@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	App Sandbox is intentionally OFF: Mana relies on global Accessibility
+	mouse monitoring (NSEvent.addGlobalMonitorForEvents) and talks to
+	undocumented session-token endpoints of third-party AI services.
+	Distribution is outside the Mac App Store (signed + notarized .dmg),
+	so sandboxing is not required. See docs/ТЗ-Mana.md sections 2 and 7.
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>

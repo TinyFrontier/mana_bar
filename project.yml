@@ -1,0 +1,77 @@
+name: Mana
+options:
+  bundleIdPrefix: com.manabar
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
+
+targets:
+  Mana:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: Sources
+    info:
+      path: Sources/App/Info.plist
+      properties:
+        CFBundleDisplayName: Mana
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        LSMinimumSystemVersion: "13.0"
+        NSHumanReadableCopyright: "Copyright © 2026 Mana. All rights reserved."
+        NSPrincipalClass: NSApplication
+    entitlements:
+      path: Mana.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.manabar.Mana
+        PRODUCT_NAME: Mana
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_KEY_LSUIElement: YES
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_EMIT_LOC_STRINGS: NO
+        COMBINE_HIDPI_IMAGES: YES
+
+  ManaTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: Tests/ManaTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.manabar.ManaTests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: Mana
+
+schemes:
+  Mana:
+    build:
+      targets:
+        Mana: all
+        ManaTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ManaTests
+    archive:
+      config: Release
