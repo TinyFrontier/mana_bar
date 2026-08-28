@@ -1,8 +1,11 @@
 import Foundation
 
+// FROZEN CONTRACT (2026-08-28): this file is the shared boundary between the
+// provider layer and the UI layer. Change it only via the orchestrator session,
+// never from a single-sided implementation task.
+
 /// Identifies a supported AI service. New providers extend this enum and
-/// conform to `UsageProvider` (ТЗ §4.1: "Архитектура должна позволять
-/// добавлять новые провайдеры через общий протокол UsageProvider").
+/// conform to `UsageProvider` (ТЗ §4.1).
 enum ServiceID: String, Codable, CaseIterable, Identifiable, Sendable {
     case claude
     case chatgpt
@@ -17,62 +20,110 @@ enum ServiceID: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Error/health state of a service's usage data (ТЗ §4.3): a normal reading,
-/// or a network/auth failure that should render the ring gray with a
-/// warning glyph and surface `message` + a "Re-login" action in the detail card.
-enum UsageState: Equatable, Sendable {
-    case ok
-    case error(String)
+/// One rate-limit window as reported by the service (research doc §9.2).
+struct UsageWindow: Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        /// Rolling session window (Claude: 5h, Codex: primary/short window).
+        case session
+        /// All-models weekly window (Claude: 7d, Codex: secondary/long window).
+        case weekly
+        /// Model-scoped weekly limit (Claude `limits[].kind == "weekly_scoped"`),
+        /// e.g. "Sonnet". Associated value is the display name of the model.
+        case modelWeekly(String)
+    }
+
+    let kind: Kind
+
+    /// UI label: "Session", "Weekly", or the model name.
+    var label: String
+
+    /// 0...100, exactly as the API reports it — never inverted, never clamped
+    /// into 0...1 here (research doc §9.3: Codex `used_percent` pitfalls).
+    var usedPercent: Double
+
+    /// When the window resets. `nil` means the window has NOT started yet
+    /// ("Not started") — distinct from 0% usage (research doc §9.2 п.5).
+    var resetsAt: Date?
+
+    /// Window length (5h / 7d), when the API reports it — lets the UI derive
+    /// "Resets in Nm" even without `resetsAt`.
+    var periodDuration: TimeInterval?
 }
 
-/// Snapshot of one service's quota usage, as shown in the panel ring and
-/// detail card: session (5h window) and weekly (7-day window) percentages,
-/// their reset times, and current error state (ТЗ §3.3, §3.4, §4.1).
+/// Snapshot of one service's quota usage (ТЗ §3.3, §3.4, §4.1).
 struct ServiceUsage: Identifiable, Equatable, Sendable {
     var id: ServiceID { serviceID }
 
     let serviceID: ServiceID
 
-    /// 0...1 fraction of the current session (5h) window used.
-    var sessionPercent: Double
-    var sessionResetDate: Date?
+    /// Plan label when the API reports it (e.g. "Pro", "Max 20x").
+    var plan: String?
 
-    /// 0...1 fraction of the weekly (7-day) window used.
-    var weeklyPercent: Double
-    var weeklyResetDate: Date?
+    /// All windows the service reported. Missing resource stays absent —
+    /// never fabricate a window with 0% (research doc §9.2 п.10).
+    var windows: [UsageWindow]
 
-    var state: UsageState
-    var lastUpdated: Date
+    /// When this snapshot was fetched.
+    var refreshedAt: Date
 
-    var isError: Bool {
-        if case .error = state { return true }
-        return false
+    /// Soft warning on a partially successful fetch (data still usable).
+    var warning: String?
+
+    var sessionWindow: UsageWindow? {
+        windows.first { $0.kind == .session }
     }
 
-    // TODO: replace with real relative/absolute formatting per ТЗ §3.4
-    // examples ("Resets in 51 min", "Resets Thu 12:00 AM").
-    var sessionResetDescription: String {
-        Self.describe(resetDate: sessionResetDate)
+    var weeklyWindow: UsageWindow? {
+        windows.first { $0.kind == .weekly }
     }
 
-    var weeklyResetDescription: String {
-        Self.describe(resetDate: weeklyResetDate)
+    /// Convenience 0...1 fractions for progress rings/bars. `nil` when the
+    /// window is absent (render as "no data", not as an empty ring).
+    var sessionFraction: Double? {
+        sessionWindow.map { min(max($0.usedPercent / 100, 0), 1) }
     }
 
-    private static func describe(resetDate: Date?) -> String {
-        guard let resetDate else { return "—" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return "Resets " + formatter.localizedString(for: resetDate, relativeTo: Date())
+    var weeklyFraction: Double? {
+        weeklyWindow.map { min(max($0.usedPercent / 100, 0), 1) }
     }
 
     static let placeholder = ServiceUsage(
         serviceID: .claude,
-        sessionPercent: 0,
-        sessionResetDate: nil,
-        weeklyPercent: 0,
-        weeklyResetDate: nil,
-        state: .ok,
-        lastUpdated: .distantPast
+        plan: nil,
+        windows: [
+            UsageWindow(kind: .session, label: "Session", usedPercent: 0, resetsAt: nil, periodDuration: 5 * 3600),
+            UsageWindow(kind: .weekly, label: "Weekly", usedPercent: 0, resetsAt: nil, periodDuration: 7 * 86400),
+        ],
+        refreshedAt: .distantPast,
+        warning: nil
     )
+}
+
+/// What the UI knows about one service right now. The store layer owns the
+/// "keep last good snapshot on failure" rule (research doc §9.2 п.1):
+/// a fetch error downgrades `.ready` to `.stale`, never wipes data.
+enum ServiceStatus: Equatable, Sendable {
+    /// No fetch has completed yet in this app run.
+    case loading
+    /// Fresh data.
+    case ready(ServiceUsage)
+    /// Last good data plus the error that made it stale (gray ring + message,
+    /// but numbers stay visible — ТЗ §4.3).
+    case stale(ServiceUsage, UsageError)
+    /// No data at all (e.g. never logged in). Gray ring + hint.
+    case unavailable(UsageError)
+
+    var usage: ServiceUsage? {
+        switch self {
+        case .ready(let usage), .stale(let usage, _): return usage
+        case .loading, .unavailable: return nil
+        }
+    }
+
+    var error: UsageError? {
+        switch self {
+        case .stale(_, let error), .unavailable(let error): return error
+        case .loading, .ready: return nil
+        }
+    }
 }

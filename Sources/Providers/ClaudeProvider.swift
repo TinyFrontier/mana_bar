@@ -16,10 +16,16 @@ struct ClaudeProvider: UsageProvider {
     // TODO: inject KeychainStore (or a token accessor) here.
     // private let keychainStore: KeychainStore
 
+    func hasLocalCredentials() async -> Bool {
+        // TODO: probe Claude Code keychain entry / ~/.claude/.credentials.json /
+        // Claude Desktop safe storage (ТЗ §4.2).
+        false
+    }
+
     func fetchUsage() async throws -> ServiceUsage {
-        // TODO: read session token from Keychain, call the claude.ai usage
-        // endpoint, parse session/weekly percentages + reset timestamps,
-        // and map network/auth failures to `ServiceUsage.state == .error`.
+        // TODO: discover OAuth token (Claude Code CLI / Claude Desktop), call
+        // api.anthropic.com/api/oauth/usage, map five_hour/seven_day/limits
+        // into UsageWindow values (ТЗ §4.1, research doc §4).
         fatalError("ClaudeProvider.fetchUsage() not implemented — setup-phase stub")
     }
 }

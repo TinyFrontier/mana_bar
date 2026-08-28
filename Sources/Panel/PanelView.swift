@@ -12,8 +12,8 @@ struct PanelView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            // TODO: ForEach(services) { RingView(usage: $0) }
-            RingView(usage: .placeholder)
+            // TODO: ForEach over enabled services with live ServiceStatus.
+            RingView(serviceID: .claude, status: .ready(.placeholder))
         }
         .padding(.vertical, 20)
         .padding(.horizontal, 12)

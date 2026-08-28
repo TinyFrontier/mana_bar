@@ -9,20 +9,21 @@ import SwiftUI
 /// is what triggers `DetailCardView` (ТЗ §3.4) — hover tracking is TODO,
 /// owned by the parent `PanelView` in the implementation phase.
 struct RingView: View {
-    let usage: ServiceUsage
+    let serviceID: ServiceID
+    let status: ServiceStatus
+
+    private var sessionFraction: Double {
+        status.usage?.sessionFraction ?? 0
+    }
 
     private var ringColor: Color {
-        switch usage.state {
-        case .error:
-            return .gray
-        case .ok:
-            // TODO: read configurable thresholds from AppSettings instead
-            // of the hardcoded 0.5 / 0.8 split below (ТЗ §3.3, §6).
-            switch usage.sessionPercent {
-            case ..<0.5: return .green
-            case ..<0.8: return .yellow
-            default: return .red
-            }
+        if status.error != nil { return .gray }
+        // TODO: read configurable thresholds from AppSettings instead
+        // of the hardcoded 0.5 / 0.8 split below (ТЗ §3.3, §6).
+        switch sessionFraction {
+        case ..<0.5: return .green
+        case ..<0.8: return .yellow
+        default: return .red
         }
     }
 
@@ -32,18 +33,18 @@ struct RingView: View {
                 Circle()
                     .stroke(Color.white.opacity(0.15), lineWidth: 4)
                 Circle()
-                    .trim(from: 0, to: usage.sessionPercent)
+                    .trim(from: 0, to: sessionFraction)
                     .stroke(ringColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .rotationEffect(.degrees(-90))
 
                 // TODO: replace with the real per-service logo asset.
-                Image(systemName: usage.isError ? "exclamationmark.triangle" : "circle.fill")
+                Image(systemName: status.error != nil ? "exclamationmark.triangle" : "circle.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.white)
             }
             .frame(width: 44, height: 44)
 
-            Text(usage.isError ? "—" : "\(Int(usage.sessionPercent * 100))%")
+            Text(status.usage == nil ? "—" : "\(Int(sessionFraction * 100))%")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white)
         }
@@ -51,7 +52,7 @@ struct RingView: View {
 }
 
 #Preview {
-    RingView(usage: .placeholder)
+    RingView(serviceID: .claude, status: .ready(.placeholder))
         .padding()
         .background(Color.black)
 }

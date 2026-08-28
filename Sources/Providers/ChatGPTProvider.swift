@@ -15,10 +15,15 @@ struct ChatGPTProvider: UsageProvider {
     // TODO: inject KeychainStore (or a token accessor) here.
     // private let keychainStore: KeychainStore
 
+    func hasLocalCredentials() async -> Bool {
+        // TODO: probe Codex CLI auth.json / "Codex Auth" keychain entry (ТЗ §4.2).
+        false
+    }
+
     func fetchUsage() async throws -> ServiceUsage {
-        // TODO: read session cookie from Keychain, call the chatgpt.com usage
-        // endpoint, parse session/weekly percentages + reset timestamps,
-        // and map network/auth failures to `ServiceUsage.state == .error`.
+        // TODO: discover Codex CLI OAuth token, call
+        // chatgpt.com/backend-api/wham/usage, classify windows by
+        // limit_window_seconds (ТЗ §4.1, research doc §5).
         fatalError("ChatGPTProvider.fetchUsage() not implemented — setup-phase stub")
     }
 }
