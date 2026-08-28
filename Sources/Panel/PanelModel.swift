@@ -9,8 +9,9 @@ import Foundation
 /// contract, so that wiring is additive.
 @MainActor
 final class PanelModel: ObservableObject {
-    /// Display order of services in the island (ТЗ §3.3). TODO: source from
-    /// `AppSettings` enabled/ordered service list once that's wired up.
+    /// Display order of enabled services in the island (ТЗ §3.3), sourced
+    /// from `AppSettings.effectiveServiceOrder` (order ∩ enabled) and kept
+    /// live by `AppDelegate` via `updateServiceOrder(_:)`.
     @Published private(set) var serviceOrder: [ServiceID]
 
     @Published private(set) var statuses: [ServiceID: ServiceStatus]
@@ -26,6 +27,16 @@ final class PanelModel: ObservableObject {
 
     func setStatus(_ status: ServiceStatus, for id: ServiceID) {
         statuses[id] = status
+    }
+
+    /// Applies a new enabled/ordered service list (ТЗ §6 "список сервисов:
+    /// вкл/выкл, порядок") — called by `AppDelegate` whenever
+    /// `AppSettings.serviceOrder`/`.enabledServiceIDs` change.
+    /// `UsageCoordinator` reads `serviceOrder` fresh on every poll, so a
+    /// service dropped here simply stops being fetched.
+    func updateServiceOrder(_ newOrder: [ServiceID]) {
+        guard newOrder != serviceOrder else { return }
+        serviceOrder = newOrder
     }
 }
 

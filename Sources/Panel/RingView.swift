@@ -14,6 +14,9 @@ struct RingView: View {
     let serviceID: ServiceID
     let status: ServiceStatus
     var thresholds: UsageThresholds = .default
+    /// ТЗ §6 "показывать проценты под кольцами" — when `false`, the percent
+    /// label under the ring is omitted entirely (not just dimmed).
+    var showPercent: Bool = true
 
     /// design-spec.md §3.2: SVG viewBox 0 0 38 38, ring r=16.6.
     private let frameSize: CGFloat = 38
@@ -105,11 +108,13 @@ struct RingView: View {
                 }
             }
 
-            Text(percentLabel)
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(-0.1)
-                .monospacedDigit()
-                .foregroundStyle(percentColor)
+            if showPercent {
+                Text(percentLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(-0.1)
+                    .monospacedDigit()
+                    .foregroundStyle(percentColor)
+            }
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)

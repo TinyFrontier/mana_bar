@@ -23,6 +23,10 @@ final class StatusBarController {
     /// Pause/resume background polling and the hot-zone auto-show (ТЗ §7).
     /// Receives the *new* paused state after the toggle.
     private let togglePause: (Bool) -> Void
+    /// Reopens the onboarding screen (ТЗ §7: "открывается также из
+    /// меню-бара") — Accessibility status + token-source status, no manual
+    /// token entry.
+    private let showOnboarding: () -> Void
 
     private var isPaused = false
 
@@ -32,16 +36,19 @@ final class StatusBarController {
         case refreshNow = 3
         case pause = 4
         case quit = 5
+        case onboarding = 6
     }
 
     init(
         togglePanel: @escaping () -> Void = {},
         refreshNow: @escaping () -> Void = {},
-        togglePause: @escaping (Bool) -> Void = { _ in }
+        togglePause: @escaping (Bool) -> Void = { _ in },
+        showOnboarding: @escaping () -> Void = {}
     ) {
         self.togglePanel = togglePanel
         self.refreshNow = refreshNow
         self.togglePause = togglePause
+        self.showOnboarding = showOnboarding
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         configureButton()
         configureMenu()
@@ -97,6 +104,15 @@ final class StatusBarController {
         pause.target = self
         menu.addItem(pause)
 
+        let onboarding = NSMenuItem(
+            title: "Setup & Permissions…",
+            action: #selector(showOnboardingAction(_:)),
+            keyEquivalent: ""
+        )
+        onboarding.tag = MenuItemTag.onboarding.rawValue
+        onboarding.target = self
+        menu.addItem(onboarding)
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(
@@ -125,6 +141,10 @@ final class StatusBarController {
 
     @objc private func refreshNowAction(_ sender: Any?) {
         refreshNow()
+    }
+
+    @objc private func showOnboardingAction(_ sender: Any?) {
+        showOnboarding()
     }
 
     @objc private func togglePauseAction(_ sender: Any?) {

@@ -10,6 +10,12 @@ enum PanelLayoutMetrics {
     static let ringSize: CGFloat = 38
     static let ringGap: CGFloat = 14
 
+    /// Gap from the screen's top/bottom edge for `PanelVerticalPosition
+    /// .top`/`.bottom` (ТЗ §6) — shared by `PanelWindow` and
+    /// `HotZoneGeometry` so the visible island and the invisible hot-zone
+    /// strip always agree on where "top"/"bottom" actually is.
+    static let verticalEdgeMargin: CGFloat = 24
+
     static let cardWidth: CGFloat = 300
     /// Panel-left-edge-to-card-right-edge gap (74 = 62 panel + 12 arrow gap,
     /// design-spec.md §5.2).

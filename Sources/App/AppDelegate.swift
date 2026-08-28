@@ -1,22 +1,26 @@
 import AppKit
+import Combine
+import SwiftUI
 
 /// Application lifecycle owner.
 ///
 /// Wires together the pieces that make Mana an accessory app: the status bar
-/// item/menu, the hot-zone panel, the hot-zone mouse monitor (ТЗ §7), and the
+/// item/menu, the hot-zone panel, the hot-zone mouse monitor (ТЗ §7), the
 /// `UsageCoordinator` that polls the real `UsageProvider`s and feeds results
-/// into `panelModel` (ТЗ §4.3). `PanelModel.mock` stays available for SwiftUI
-/// previews; the running app uses a live model with empty initial statuses
-/// (naturally `.loading` per `PanelModel.status(for:)`) until the
-/// coordinator's first fetch completes.
+/// into `panelModel` (ТЗ §4.3), `NotificationManager` (ТЗ §5), and the
+/// onboarding window (ТЗ §7). It also keeps every live-tunable `AppSettings`
+/// value (ТЗ §6) pushed into whichever component owns the corresponding
+/// behavior — `observeSettings()` is the one place that fan-out lives.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBarController: StatusBarController?
     private var panelWindow: PanelWindow?
     private var hotZoneMonitor: HotZoneMonitor?
     private var usageCoordinator: UsageCoordinator?
+    private var onboardingWindow: NSWindow?
+    private var settingsSubscriptions: Set<AnyCancellable> = []
 
-    private let panelModel = PanelModel(serviceOrder: Array(ServiceID.allCases), statuses: [:])
+    private let panelModel = PanelModel(serviceOrder: AppSettings.shared.effectiveServiceOrder, statuses: [:])
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Accessory app: no Dock icon, no automatic main window.
@@ -27,6 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hotZoneMonitor = HotZoneMonitor()
         hotZoneMonitor.panelHeight = PanelLayoutMetrics.panelHeight(serviceCount: panelModel.serviceOrder.count)
+        hotZoneMonitor.edge = AppSettings.shared.panelEdge
+        hotZoneMonitor.verticalPosition = AppSettings.shared.verticalPosition
+        hotZoneMonitor.appearDelay = TimeInterval(AppSettings.shared.appearDelayMs) / 1000
+        hotZoneMonitor.disappearDelay = TimeInterval(AppSettings.shared.disappearDelayMs) / 1000
         hotZoneMonitor.panelHitTestFrame = { [weak panelWindow] in panelWindow?.hitTestFrame }
         hotZoneMonitor.onEnterHotZone = { [weak self, weak panelWindow] in
             guard let self, let panelWindow, let screen = self.currentScreen() else { return }
@@ -44,7 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // granted, `start()` installs nothing and returns false — global
         // hover tracking simply won't fire, and the menu-bar "Show/Hide
         // Panel" item (wired below) is the only way to reveal the panel.
-        // TODO: onboarding screen prompting for the permission (ТЗ §7).
+        // The onboarding window (shown below on first launch, or any time
+        // from the menu) explains this and offers the System Settings
+        // prompt.
         _ = hotZoneMonitor.start()
 
         let coordinator = Self.makeUsageCoordinator(model: panelModel)
@@ -63,7 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     self.usageCoordinator?.resume()
                 }
-            }
+            },
+            showOnboarding: { [weak self] in self?.showOnboardingWindow() }
         )
 
         NotificationCenter.default.addObserver(
@@ -73,7 +84,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        // TODO: onboarding screen prompting for the permission (ТЗ §7).
+        // ТЗ §5: ask once; UNUserNotificationCenter itself won't re-prompt
+        // the user on later launches.
+        Task { await NotificationManager.shared.requestAuthorizationIfNeeded() }
+
+        observeSettings()
+
+        // ТЗ §7: first-run onboarding — Accessibility explanation + token-
+        // source status. Also reachable any time from the status-bar menu.
+        if !AppSettings.shared.hasCompletedOnboarding {
+            showOnboardingWindow()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -96,7 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ),
             .chatgpt: UsageCoordinator.ProviderPair(ChatGPTProvider()),
         ]
-        return UsageCoordinator(model: model, providers: providers)
+        return UsageCoordinator(
+            model: model,
+            providers: providers,
+            // ТЗ §5: clean integration point — every successful fetch's
+            // fresh snapshot is evaluated for threshold crossings.
+            onUsageUpdated: { usage in NotificationManager.shared.evaluate(usage) }
+        )
     }
 
     /// Menu-bar fallback toggle (ТЗ §11): works with or without Accessibility
@@ -122,7 +149,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Screen containing the cursor, falling back to the main screen
-    /// (ТЗ §6: "по умолчанию — экран с курсором").
+    /// (ТЗ §6: "по умолчанию — экран с курсором"). TODO: honor
+    /// `AppSettings.preferredScreenID` once Settings grows an explicit
+    /// monitor picker — simplified to the cursor-screen default for now.
     private func currentScreen() -> NSScreen? {
         let mouseLocation = NSEvent.mouseLocation
         return NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
@@ -134,5 +163,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func screenParametersDidChange() {
         guard let screen = currentScreen() else { return }
         panelWindow?.reposition(on: screen)
+    }
+
+    // MARK: - Live settings wiring (ТЗ §6)
+
+    /// Subscribes to every `AppSettings` field that some other component
+    /// needs pushed into it explicitly (as opposed to `PanelView`/
+    /// `RingView`/`DetailCardView`, which observe `AppSettings.shared`
+    /// directly since they're already SwiftUI). Kept in one place so the
+    /// fan-out from "a setting changed" to "who needs to know" is easy to
+    /// audit.
+    private func observeSettings() {
+        let settings = AppSettings.shared
+
+        settings.$refreshInterval
+            .dropFirst()
+            .sink { [weak self] interval in
+                self?.usageCoordinator?.updateRefreshInterval(TimeInterval(interval.rawValue))
+            }
+            .store(in: &settingsSubscriptions)
+
+        settings.$appearDelayMs
+            .dropFirst()
+            .sink { [weak self] ms in
+                self?.hotZoneMonitor?.appearDelay = TimeInterval(ms) / 1000
+            }
+            .store(in: &settingsSubscriptions)
+
+        settings.$disappearDelayMs
+            .dropFirst()
+            .sink { [weak self] ms in
+                self?.hotZoneMonitor?.disappearDelay = TimeInterval(ms) / 1000
+            }
+            .store(in: &settingsSubscriptions)
+
+        settings.$panelEdge
+            .dropFirst()
+            .sink { [weak self] edge in
+                self?.hotZoneMonitor?.edge = edge
+                self?.repositionPanel()
+            }
+            .store(in: &settingsSubscriptions)
+
+        settings.$verticalPosition
+            .dropFirst()
+            .sink { [weak self] verticalPosition in
+                self?.hotZoneMonitor?.verticalPosition = verticalPosition
+                self?.repositionPanel()
+            }
+            .store(in: &settingsSubscriptions)
+
+        Publishers.CombineLatest(settings.$serviceOrder, settings.$enabledServiceIDs)
+            .dropFirst()
+            .sink { [weak self] order, enabled in
+                guard let self else { return }
+                let effective = order.filter { enabled.contains($0) }
+                self.panelModel.updateServiceOrder(effective)
+                self.hotZoneMonitor?.panelHeight = PanelLayoutMetrics.panelHeight(serviceCount: effective.count)
+            }
+            .store(in: &settingsSubscriptions)
+    }
+
+    private func repositionPanel() {
+        guard let panelWindow, let screen = currentScreen() else { return }
+        panelWindow.reposition(on: screen)
+    }
+
+    // MARK: - Onboarding (ТЗ §7)
+
+    /// Shows the onboarding window, creating it once and reusing it after
+    /// (reachable both on first launch and from the status-bar menu).
+    private func showOnboardingWindow() {
+        if let onboardingWindow {
+            NSApp.activate(ignoringOtherApps: true)
+            onboardingWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 580),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Welcome to Mana"
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.contentView = NSHostingView(rootView: OnboardingView(onDone: { [weak window] in
+            window?.close()
+        }))
+        onboardingWindow = window
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 }

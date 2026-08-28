@@ -72,14 +72,24 @@ final class UsageCoordinator {
     }
 
     private let model: PanelModel
-    private let order: [ServiceID]
     private let providers: [ServiceID: ProviderPair]
-    private let pollInterval: TimeInterval
     private let forceRefreshStaleness: TimeInterval
     private let fixedCooldown: TimeInterval
     private let observesWake: Bool
     private let fetchTimeout: TimeInterval
     private let now: @Sendable () -> Date
+    private let onUsageUpdated: (@MainActor (ServiceUsage) -> Void)?
+
+    /// Mutable so `updateRefreshInterval(_:)` (ТЗ §6: refresh interval
+    /// setting) can change it and reschedule the pending timer.
+    private var pollInterval: TimeInterval
+
+    /// Which services are actually polled — always `model.serviceOrder`,
+    /// read fresh on every poll rather than captured once at `init`, so a
+    /// service `AppSettings` disables (ТЗ §6 "вкл/выкл") simply stops being
+    /// fetched the moment `PanelModel.updateServiceOrder(_:)` drops it,
+    /// without the coordinator needing to be rebuilt.
+    private var order: [ServiceID] { model.serviceOrder }
 
     private var pollState: [ServiceID: PollState] = [:]
     private var inFlight: Set<ServiceID> = []
@@ -99,18 +109,19 @@ final class UsageCoordinator {
         fixedCooldown: TimeInterval = 60,
         observesWake: Bool = true,
         fetchTimeout: TimeInterval = 15,
+        onUsageUpdated: (@MainActor (ServiceUsage) -> Void)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.model = model
-        self.order = model.serviceOrder
         self.providers = providers
         self.pollInterval = pollInterval ?? TimeInterval(AppSettings.shared.refreshInterval.rawValue)
         self.forceRefreshStaleness = forceRefreshStaleness
         self.fixedCooldown = fixedCooldown
         self.observesWake = observesWake
         self.fetchTimeout = fetchTimeout
+        self.onUsageUpdated = onUsageUpdated
         self.now = now
-        for id in order { pollState[id] = PollState() }
+        for id in model.serviceOrder { pollState[id] = PollState() }
     }
 
     deinit {
@@ -164,6 +175,17 @@ final class UsageCoordinator {
     func resume() {
         guard isPaused else { return }
         isPaused = false
+        scheduleTimer()
+    }
+
+    /// Applies a new poll interval (ТЗ §6 refresh-interval setting) and, if
+    /// a timer is currently pending, reschedules it to fire `newInterval`
+    /// from now — an in-flight fetch or the next tick's own reschedule is
+    /// left alone, only the *pending* wait is shortened/lengthened.
+    func updateRefreshInterval(_ newInterval: TimeInterval) {
+        guard newInterval != pollInterval else { return }
+        pollInterval = newInterval
+        guard !isPaused, timerWorkItem != nil else { return }
         scheduleTimer()
     }
 
@@ -299,6 +321,11 @@ final class UsageCoordinator {
     private func recordSuccess(id: ServiceID, usage: ServiceUsage) {
         pollState[id] = PollState()
         model.setStatus(.ready(usage), for: id)
+        // Clean integration point for ТЗ §5 notifications: every successful
+        // fetch's fresh snapshot is handed to whoever wants to react to it
+        // (`NotificationManager.evaluate`, wired by `AppDelegate`) — the
+        // coordinator itself has no notification-specific knowledge.
+        onUsageUpdated?(usage)
     }
 
     private func recordFailure(id: ServiceID, error: UsageError) {
