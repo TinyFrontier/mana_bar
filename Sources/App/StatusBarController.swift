@@ -4,21 +4,28 @@ import AppKit
 ///
 /// Per docs/ТЗ-Mana.md section 7, Mana has no Dock icon; the status bar item
 /// is the only always-visible system-integration surface, exposing:
-/// Open Settings, Refresh Now, Pause, Quit. This is the one piece of the
-/// setup skeleton that is fully wired up (a bare status item is required for
-/// the app to be usable at all); the actions themselves are TODO stubs that
-/// the implementation phase will connect to the real panel/provider logic.
+/// Open Settings, Show/Hide Panel, Refresh Now, Pause, Quit. "Show/Hide
+/// Panel" is wired to `PanelWindow.show`/`.hide` via the `togglePanel`
+/// closure (ТЗ §11: manual fallback when Accessibility permission isn't
+/// granted and the hot-zone mouse monitor can't run). The remaining actions
+/// are TODO stubs the provider-wiring phase will connect.
 final class StatusBarController {
     private let statusItem: NSStatusItem
 
+    /// Manual show/hide fallback (ТЗ §11): invoked by the "Show/Hide Panel"
+    /// menu item, independent of the Accessibility-gated hot-zone monitor.
+    private let togglePanel: () -> Void
+
     private enum MenuItemTag: Int {
         case openSettings = 1
-        case refreshNow = 2
-        case pause = 3
-        case quit = 4
+        case togglePanel = 2
+        case refreshNow = 3
+        case pause = 4
+        case quit = 5
     }
 
-    init() {
+    init(togglePanel: @escaping () -> Void = {}) {
+        self.togglePanel = togglePanel
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         configureButton()
         configureMenu()
@@ -44,6 +51,17 @@ final class StatusBarController {
         openSettings.tag = MenuItemTag.openSettings.rawValue
         openSettings.target = self
         menu.addItem(openSettings)
+
+        // ТЗ §11 fallback: works whether or not Accessibility permission is
+        // granted, since it doesn't depend on the hot-zone mouse monitor.
+        let showHidePanel = NSMenuItem(
+            title: "Show/Hide Panel",
+            action: #selector(toggleShowHidePanel(_:)),
+            keyEquivalent: "p"
+        )
+        showHidePanel.tag = MenuItemTag.togglePanel.rawValue
+        showHidePanel.target = self
+        menu.addItem(showHidePanel)
 
         let refreshNow = NSMenuItem(
             title: "Refresh Now",
@@ -83,6 +101,10 @@ final class StatusBarController {
             NSApp.activate(ignoringOtherApps: true)
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         }
+    }
+
+    @objc private func toggleShowHidePanel(_ sender: Any?) {
+        togglePanel()
     }
 
     @objc private func refreshNow(_ sender: Any?) {
