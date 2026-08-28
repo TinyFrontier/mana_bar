@@ -60,12 +60,31 @@ xcodebuild -project Mana.xcodeproj -scheme Mana -configuration Debug test -desti
 
 ## Status
 
-**Setup phase complete.** Every file under `Sources/` is a compiling stub
-(doc-commented with what it should eventually do and a `TODO`) except
-`StatusBarController`, which is minimally functional (menu bar icon + Open
-Settings / Refresh Now / Pause / Quit items) since a bare status item is
-needed for the app to be usable at all. `ClaudeProvider`/`ChatGPTProvider`
-intentionally `fatalError` in `fetchUsage()` — inert until wired up, no
-current code path calls them. **Real logic (hot-zone tracking, panel
-animation, provider networking, Keychain, notifications, settings
-persistence) is the next phase**, not yet started.
+**MVP implemented (2026-08-29).** All layers are real, ~160 unit tests:
+
+- **Providers** (`Sources/Providers/`): Claude (Keychain Claude Code /
+  `~/.claude/.credentials.json` / Claude Desktop safe-storage) and Codex
+  (`~/.codex/auth.json` / "Codex Auth" keychain) auth stores, both with a
+  silent vs interactive split; usage clients + mappers; 401/403→refresh→
+  retry-once; 429/Retry-After. The frozen data contract lives in
+  `UsageProvider.swift` / `ServiceUsage.swift` — change it only
+  deliberately, both layers depend on it.
+- **Silent Keychain rule**: legacy login-keychain items ignore
+  `LAContext.interactionNotAllowed`; the only honored switch is
+  `SecKeychainSetUserInteractionAllowed(false)` — see `withKeychainGate`
+  in `KeychainStore.swift`. `UsageError.keychainAccessDenied` = item
+  exists but needs a one-time interactive grant (Refresh Now → Always
+  Allow).
+- **Panel** (`Sources/Panel/`): hot-zone monitor (Accessibility-gated,
+  manual Show/Hide fallback in the menu), non-activating NSPanel over
+  fullscreen, rings + detail card matching `docs/design/design-spec.md`.
+- **App** (`Sources/App/`): `UsageCoordinator` (independent parallel
+  polling, last-good snapshot on failure, 60s failure cooldown, 15s fetch
+  timeout, wake refresh, pause/resume), onboarding, credential-source
+  status.
+- **Settings/Notifications**: persisted `AppSettings` wired live;
+  UNUserNotificationCenter thresholds with per-window cooldown.
+
+Known TODOs: left screen edge (Settings control disabled), explicit
+monitor picker, real service logos (SF Symbol placeholders), deep
+multi-monitor/Spaces handling, .dmg packaging/signing/notarization.
