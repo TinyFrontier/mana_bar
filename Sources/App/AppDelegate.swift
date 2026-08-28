@@ -3,18 +3,20 @@ import AppKit
 /// Application lifecycle owner.
 ///
 /// Wires together the pieces that make Mana an accessory app: the status bar
-/// item/menu, the hot-zone panel, and the hot-zone mouse monitor (ТЗ §7).
-/// `PanelModel.mock` stands in for the real provider-polling coordinator
-/// until the next wave wires up `UsageProvider` fetches — everything below
-/// only depends on the frozen `ServiceStatus`/`ServiceUsage` contract, so
-/// swapping the mock for live data later is additive here.
+/// item/menu, the hot-zone panel, the hot-zone mouse monitor (ТЗ §7), and the
+/// `UsageCoordinator` that polls the real `UsageProvider`s and feeds results
+/// into `panelModel` (ТЗ §4.3). `PanelModel.mock` stays available for SwiftUI
+/// previews; the running app uses a live model with empty initial statuses
+/// (naturally `.loading` per `PanelModel.status(for:)`) until the
+/// coordinator's first fetch completes.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBarController: StatusBarController?
     private var panelWindow: PanelWindow?
     private var hotZoneMonitor: HotZoneMonitor?
+    private var usageCoordinator: UsageCoordinator?
 
-    private let panelModel = PanelModel.mock
+    private let panelModel = PanelModel(serviceOrder: Array(ServiceID.allCases), statuses: [:])
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Accessory app: no Dock icon, no automatic main window.
@@ -27,8 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotZoneMonitor.panelHeight = PanelLayoutMetrics.panelHeight(serviceCount: panelModel.serviceOrder.count)
         hotZoneMonitor.panelHitTestFrame = { [weak panelWindow] in panelWindow?.hitTestFrame }
         hotZoneMonitor.onEnterHotZone = { [weak self, weak panelWindow] in
-            guard let panelWindow, let screen = self?.currentScreen() else { return }
-            panelWindow.show(on: screen)
+            guard let self, let panelWindow, let screen = self.currentScreen() else { return }
+            // Pause (ТЗ §7) also suppresses the hot-zone auto-show; the
+            // menu-bar "Show/Hide Panel" fallback still works while paused.
+            guard self.usageCoordinator?.isPaused != true else { return }
+            self.showPanelAndRefreshIfStale(panelWindow, on: screen)
         }
         hotZoneMonitor.onLeaveHotZone = { [weak panelWindow] in
             panelWindow?.hide()
@@ -42,9 +47,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // TODO: onboarding screen prompting for the permission (ТЗ §7).
         _ = hotZoneMonitor.start()
 
-        statusBarController = StatusBarController(togglePanel: { [weak self] in
-            self?.toggleManualPanel()
-        })
+        let coordinator = Self.makeUsageCoordinator(model: panelModel)
+        usageCoordinator = coordinator
+        coordinator.start()
+
+        statusBarController = StatusBarController(
+            togglePanel: { [weak self] in self?.toggleManualPanel() },
+            refreshNow: { [weak self] in
+                Task { await self?.usageCoordinator?.refreshNow() }
+            },
+            togglePause: { [weak self] paused in
+                guard let self else { return }
+                if paused {
+                    self.usageCoordinator?.pause()
+                } else {
+                    self.usageCoordinator?.resume()
+                }
+            }
+        )
 
         NotificationCenter.default.addObserver(
             self,
@@ -53,14 +73,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        // TODO: start UsageProvider polling via a coordinator and feed
-        // results into `panelModel.setStatus(_:for:)` (ТЗ §4.3).
-        // TODO: sleep/wake handling beyond screen-parameter changes (ТЗ §7)
-        // — NSWorkspace.didWakeNotification to re-run reposition/timers.
+        // TODO: onboarding screen prompting for the permission (ТЗ §7).
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         hotZoneMonitor?.stop()
+        usageCoordinator?.stop()
+    }
+
+    /// Builds the two providers (Claude, ChatGPT), each with a silent
+    /// instance for background/automatic polls and an interactive one used
+    /// only by the "Refresh Now" menu action (ТЗ §4.2: background polls must
+    /// never raise a Keychain dialog). ChatGPT's `CodexAuthStore` has no such
+    /// interactive/silent distinction, so both sides share one instance.
+    private static func makeUsageCoordinator(model: PanelModel) -> UsageCoordinator {
+        let claudeSilentAuth = ClaudeAuthStore(allowsKeychainInteraction: false)
+        let claudeInteractiveAuth = ClaudeAuthStore(allowsKeychainInteraction: true)
+        let providers: [ServiceID: UsageCoordinator.ProviderPair] = [
+            .claude: UsageCoordinator.ProviderPair(
+                silent: ClaudeProvider(authStore: claudeSilentAuth),
+                interactive: ClaudeProvider(authStore: claudeInteractiveAuth)
+            ),
+            .chatgpt: UsageCoordinator.ProviderPair(ChatGPTProvider()),
+        ]
+        return UsageCoordinator(model: model, providers: providers)
     }
 
     /// Menu-bar fallback toggle (ТЗ §11): works with or without Accessibility
@@ -70,7 +106,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if panelWindow.isShown {
             panelWindow.hide()
         } else {
-            panelWindow.show(on: screen)
+            showPanelAndRefreshIfStale(panelWindow, on: screen)
+        }
+    }
+
+    /// Shows the panel immediately (never blocked on the network) and, in the
+    /// background, force-refreshes any service whose data is stale or
+    /// missing (ТЗ §4.3) — the panel's `@Published` statuses update it
+    /// reactively once a fetch completes.
+    private func showPanelAndRefreshIfStale(_ panelWindow: PanelWindow, on screen: NSScreen) {
+        panelWindow.show(on: screen)
+        Task { [weak self] in
+            await self?.usageCoordinator?.forceRefreshIfStale()
         }
     }
 

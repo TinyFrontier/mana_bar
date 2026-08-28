@@ -7,14 +7,24 @@ import AppKit
 /// Open Settings, Show/Hide Panel, Refresh Now, Pause, Quit. "Show/Hide
 /// Panel" is wired to `PanelWindow.show`/`.hide` via the `togglePanel`
 /// closure (ТЗ §11: manual fallback when Accessibility permission isn't
-/// granted and the hot-zone mouse monitor can't run). The remaining actions
-/// are TODO stubs the provider-wiring phase will connect.
+/// granted and the hot-zone mouse monitor can't run). "Refresh Now" and
+/// "Pause" delegate to `AppDelegate`'s `UsageCoordinator` via their own
+/// closures; this type only owns the menu item itself, including flipping
+/// its title between "Pause"/"Resume" (ТЗ §7).
 final class StatusBarController {
     private let statusItem: NSStatusItem
 
     /// Manual show/hide fallback (ТЗ §11): invoked by the "Show/Hide Panel"
     /// menu item, independent of the Accessibility-gated hot-zone monitor.
     private let togglePanel: () -> Void
+    /// Interactive refresh of every service (ТЗ §4.3) — the one path allowed
+    /// to raise a Keychain "allow access" dialog.
+    private let refreshNow: () -> Void
+    /// Pause/resume background polling and the hot-zone auto-show (ТЗ §7).
+    /// Receives the *new* paused state after the toggle.
+    private let togglePause: (Bool) -> Void
+
+    private var isPaused = false
 
     private enum MenuItemTag: Int {
         case openSettings = 1
@@ -24,8 +34,14 @@ final class StatusBarController {
         case quit = 5
     }
 
-    init(togglePanel: @escaping () -> Void = {}) {
+    init(
+        togglePanel: @escaping () -> Void = {},
+        refreshNow: @escaping () -> Void = {},
+        togglePause: @escaping (Bool) -> Void = { _ in }
+    ) {
         self.togglePanel = togglePanel
+        self.refreshNow = refreshNow
+        self.togglePause = togglePause
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         configureButton()
         configureMenu()
@@ -65,7 +81,7 @@ final class StatusBarController {
 
         let refreshNow = NSMenuItem(
             title: "Refresh Now",
-            action: #selector(refreshNow(_:)),
+            action: #selector(refreshNowAction(_:)),
             keyEquivalent: "r"
         )
         refreshNow.tag = MenuItemTag.refreshNow.rawValue
@@ -74,7 +90,7 @@ final class StatusBarController {
 
         let pause = NSMenuItem(
             title: "Pause",
-            action: #selector(togglePause(_:)),
+            action: #selector(togglePauseAction(_:)),
             keyEquivalent: ""
         )
         pause.tag = MenuItemTag.pause.rawValue
@@ -107,11 +123,18 @@ final class StatusBarController {
         togglePanel()
     }
 
-    @objc private func refreshNow(_ sender: Any?) {
-        // TODO: trigger an immediate poll of all enabled UsageProviders.
+    @objc private func refreshNowAction(_ sender: Any?) {
+        refreshNow()
     }
 
-    @objc private func togglePause(_ sender: Any?) {
-        // TODO: pause/resume the hot-zone monitor + polling, flip menu item state.
+    @objc private func togglePauseAction(_ sender: Any?) {
+        isPaused.toggle()
+        updatePauseMenuItemTitle()
+        togglePause(isPaused)
+    }
+
+    private func updatePauseMenuItemTitle() {
+        guard let item = statusItem.menu?.item(withTag: MenuItemTag.pause.rawValue) else { return }
+        item.title = isPaused ? "Resume" : "Pause"
     }
 }
