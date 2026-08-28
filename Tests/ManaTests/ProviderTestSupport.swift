@@ -67,10 +67,23 @@ extension HTTPResponse {
 /// In-memory `KeychainReading`. Every provider test injects one so the suite can
 /// never read or write the developer's real Keychain.
 final class StubKeychain: KeychainReading, @unchecked Sendable {
+    /// One data read this stub was asked to serve.
+    struct DataRead: Equatable {
+        var service: String
+        var account: String?
+        var allowInteraction: Bool
+    }
+
     private let lock = NSLock()
     private var items: [String: String]
+    private var reads: [DataRead] = []
     /// When set, reads throw it instead of returning a value.
     var readError: KeychainError?
+    /// When set, only reads that **forbid** interaction throw it — the shape of
+    /// a Keychain item that exists but whose ACL this app has not been granted:
+    /// the existence probe still answers, an interactive read still works, and
+    /// the silent read fails fast.
+    var silentReadError: KeychainError?
     /// When true, writes throw `.accessDenied`.
     var refusesWrites = false
 
@@ -87,7 +100,12 @@ final class StubKeychain: KeychainReading, @unchecked Sendable {
         account: String?,
         allowInteraction: Bool
     ) throws -> String? {
+        lock.lock()
+        reads.append(DataRead(service: service, account: account, allowInteraction: allowInteraction))
+        lock.unlock()
+
         if let readError { throw readError }
+        if !allowInteraction, let silentReadError { throw silentReadError }
         lock.lock()
         defer { lock.unlock() }
         return items[Self.key(service, account)] ?? items[Self.key(service, nil)]
@@ -97,6 +115,14 @@ final class StubKeychain: KeychainReading, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return items[Self.key(service, account)] != nil || items[Self.key(service, nil)] != nil
+    }
+
+    /// Every data read served so far, in order. Lets a test assert that the
+    /// launch-path existence probe never asked for the secret.
+    var dataReads: [DataRead] {
+        lock.lock()
+        defer { lock.unlock() }
+        return reads
     }
 
     func writeGenericPassword(service: String, account: String?, value: String) throws {
