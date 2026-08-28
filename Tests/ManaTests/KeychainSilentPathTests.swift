@@ -11,8 +11,11 @@ import XCTest
 /// 8+ seconds per call on a machine without that grant, and sometimes not
 /// returning at all. A background poll must therefore fail fast instead of
 /// waiting: "the item is there, but this app may not read it silently" is
-/// reported as "no credentials" for the silent provider, while the interactive
-/// "Refresh Now" path stays free to raise the system dialog.
+/// reported as `UsageError.keychainAccessDenied` for the silent provider —
+/// distinct from `.notLoggedIn`, since the login does exist and one
+/// interactive "Refresh Now" + "Always Allow" grant fixes it permanently —
+/// while the interactive "Refresh Now" path stays free to raise the system
+/// dialog.
 final class KeychainSilentPathTests: XCTestCase {
     private static let liveClaudeService = "Claude Code-credentials"
 
@@ -143,7 +146,10 @@ final class KeychainSilentPathTests: XCTestCase {
         XCTAssertTrue(keychain.dataReads.contains { $0.allowInteraction })
     }
 
-    func testSilentProviderFailsFastAsNotLoggedIn() async throws {
+    /// An item present but denied on the silent path is a permission problem,
+    /// not "not logged in" — the login is right there, Mana just hasn't been
+    /// granted access to read it silently yet.
+    func testSilentProviderFailsFastAsKeychainAccessDenied() async throws {
         let directory = TemporaryDirectory(self)
         let probe = makeStore(
             directory: directory,
@@ -156,6 +162,27 @@ final class KeychainSilentPathTests: XCTestCase {
             authStore: makeStore(
                 directory: directory,
                 keychain: makeUnreadableKeychain(service: service),
+                allowsKeychainInteraction: false
+            ),
+            usageClient: ClaudeUsageClient(http: http)
+        )
+
+        let start = Date()
+        await XCTAssertUsageErrorAsync(try await provider.fetchUsage(), .keychainAccessDenied)
+        XCTAssertLessThan(Date().timeIntervalSince(start), Self.silentBudget)
+        XCTAssertTrue(http.sentRequests.isEmpty, "a request was sent without a credential")
+    }
+
+    /// A genuinely empty Keychain (no item at all) still fails fast as
+    /// `.notLoggedIn` — the accessDenied diagnosis must not fire when there
+    /// is nothing to be denied access to.
+    func testSilentProviderWithNoCredentialAtAllFailsFastAsNotLoggedIn() async {
+        let directory = TemporaryDirectory(self)
+        let http = StubHTTPClient([])
+        let provider = ClaudeProvider(
+            authStore: makeStore(
+                directory: directory,
+                keychain: StubKeychain(),
                 allowsKeychainInteraction: false
             ),
             usageClient: ClaudeUsageClient(http: http)

@@ -246,7 +246,7 @@ private struct ServiceRow: View {
     let moveUp: () -> Void
     let moveDown: () -> Void
 
-    @State private var found: Bool?
+    @State private var finding: CredentialSourceStatus.Finding?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -281,10 +281,14 @@ private struct ServiceRow: View {
 
     @ViewBuilder
     private var statusText: some View {
-        switch found {
-        case .some(true):
+        switch finding {
+        case .found:
             Text("Found").font(.caption).foregroundStyle(.green)
-        case .some(false):
+        case .needsKeychainPermission:
+            // ТЗ §7 addendum: distinct from "Found" — the login exists but
+            // won't actually work until a one-time Keychain grant happens.
+            Text("Needs permission").font(.caption).foregroundStyle(.orange)
+        case .notFound:
             Text("Not found").font(.caption).foregroundStyle(.secondary)
         case .none:
             Text("Checking…").font(.caption).foregroundStyle(.secondary)
@@ -292,7 +296,7 @@ private struct ServiceRow: View {
     }
 
     private func refresh() async {
-        found = await CredentialSourceStatus.check(serviceID)
+        finding = await CredentialSourceStatus.status(serviceID)
     }
 }
 

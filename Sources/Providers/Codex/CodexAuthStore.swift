@@ -86,17 +86,26 @@ struct CodexAuthStore: Sendable {
     var environment: EnvironmentReading
     var files: TextFileAccessing
     var keychain: KeychainReading
+    /// Whether reading the `Codex Auth` Keychain item may raise the macOS
+    /// "allow access" dialog — the same silent/interactive split
+    /// `ClaudeAuthStore.allowsKeychainInteraction` uses. Left `true` so a
+    /// fresh install works without hunting for a button; a store built for a
+    /// background poll should pass `false` and pair it with an interactive
+    /// instance for "Refresh Now".
+    var allowsKeychainInteraction: Bool
     var now: @Sendable () -> Date
 
     init(
         environment: EnvironmentReading = ProcessEnvironmentReader(),
         files: TextFileAccessing = LocalTextFileAccessor(),
         keychain: KeychainReading = KeychainStore(),
+        allowsKeychainInteraction: Bool = true,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.environment = environment
         self.files = files
         self.keychain = keychain
+        self.allowsKeychainInteraction = allowsKeychainInteraction
         self.now = now
     }
 
@@ -137,13 +146,44 @@ struct CodexAuthStore: Sendable {
     }
 
     func loadKeychainCredential() -> CodexCredential? {
-        guard let value = (try? keychain.readGenericPassword(service: Self.keychainService)) ?? nil,
+        // A throw here (locked keychain, denied) is not "not logged in": it
+        // just means this source cannot answer silently right now.
+        guard let value = (try? keychain.readGenericPassword(
+                service: Self.keychainService,
+                account: nil,
+                allowInteraction: allowsKeychainInteraction
+              )) ?? nil,
               let auth = Self.parseAuth(value),
               Self.hasTokenLikeAuth(auth)
         else {
             return nil
         }
         return CodexCredential(auth: auth, source: .keychain, rawText: value)
+    }
+
+    /// Whether the `Codex Auth` Keychain item is confirmed present by the
+    /// cheap attributes-only probe, yet the same silent read
+    /// `loadKeychainCredential()` performs fails with `.accessDenied` rather
+    /// than "no such item" — the same "logged in, permission not granted
+    /// yet" case `ClaudeAuthStore.keychainAccessIsDenied()` diagnoses.
+    /// Meaningful only once the `auth.json` file sources have also come up
+    /// empty (checked by the caller).
+    func keychainAccessIsDenied() -> Bool {
+        guard keychain.genericPasswordExists(service: Self.keychainService, account: nil) == true else {
+            return false
+        }
+        do {
+            _ = try keychain.readGenericPassword(
+                service: Self.keychainService,
+                account: nil,
+                allowInteraction: allowsKeychainInteraction
+            )
+        } catch KeychainError.accessDenied {
+            return true
+        } catch {
+            // Any other outcome is not the permission case.
+        }
+        return false
     }
 
     func authPaths() -> [String] {

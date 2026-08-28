@@ -30,7 +30,12 @@ struct ChatGPTProvider: UsageProvider {
 
     func fetchUsage() async throws -> ServiceUsage {
         let credentials = authStore.loadCredentials()
-        guard !credentials.isEmpty else { throw UsageError.notLoggedIn }
+        guard !credentials.isEmpty else {
+            // A Keychain item that exists but could not be read silently must
+            // not be reported as "not logged in" — same distinction the
+            // Claude provider makes.
+            throw authStore.keychainAccessIsDenied() ? UsageError.keychainAccessDenied : UsageError.notLoggedIn
+        }
 
         var fallbackError: UsageError?
         for credential in credentials {
@@ -46,7 +51,7 @@ struct ChatGPTProvider: UsageProvider {
 
     private static func allowsCredentialFallback(_ error: UsageError) -> Bool {
         switch error {
-        case .sessionExpired, .missingScope, .notLoggedIn:
+        case .sessionExpired, .missingScope, .notLoggedIn, .keychainAccessDenied:
             return true
         case .rateLimited, .requestFailed, .connectionFailed, .decodingFailed:
             return false

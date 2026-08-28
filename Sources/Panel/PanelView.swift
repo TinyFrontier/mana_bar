@@ -36,7 +36,12 @@ struct PanelView: View {
     var body: some View {
         ZStack(alignment: .trailing) {
             if let hoveredServiceID, let index = services.firstIndex(of: hoveredServiceID) {
-                DetailCardView(serviceID: hoveredServiceID, status: model.status(for: hoveredServiceID), thresholds: thresholds)
+                DetailCardView(
+                    serviceID: hoveredServiceID,
+                    status: model.status(for: hoveredServiceID),
+                    thresholds: thresholds,
+                    onErrorAction: { model.requestManualRefresh() }
+                )
                     .offset(
                         x: -(PanelLayoutMetrics.panelWidth + PanelLayoutMetrics.cardGap),
                         y: PanelLayoutMetrics.ringCenterOffset(index: index, count: services.count)

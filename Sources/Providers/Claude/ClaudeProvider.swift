@@ -36,7 +36,12 @@ struct ClaudeProvider: UsageProvider {
 
     func fetchUsage() async throws -> ServiceUsage {
         let credentials = authStore.loadCredentials().filter(\.hasUsableAccessToken)
-        guard !credentials.isEmpty else { throw UsageError.notLoggedIn }
+        guard !credentials.isEmpty else {
+            // A Keychain item that exists but could not be read silently must
+            // not be reported as "not logged in" — the fix is one interactive
+            // grant, not a re-login (research doc: silent-path Keychain fix).
+            throw authStore.keychainAccessIsDenied() ? UsageError.keychainAccessDenied : UsageError.notLoggedIn
+        }
 
         var fallbackError: UsageError?
         for credential in credentials {
@@ -57,7 +62,7 @@ struct ClaudeProvider: UsageProvider {
     /// rate-limited endpoint makes the limit worse (research doc §9.2 п.4).
     private static func allowsCredentialFallback(_ error: UsageError) -> Bool {
         switch error {
-        case .sessionExpired, .missingScope, .notLoggedIn:
+        case .sessionExpired, .missingScope, .notLoggedIn, .keychainAccessDenied:
             return true
         case .rateLimited, .requestFailed, .connectionFailed, .decodingFailed:
             return false

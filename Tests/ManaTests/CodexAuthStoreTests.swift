@@ -246,4 +246,72 @@ final class CodexAuthStoreTests: XCTestCase {
         let credential = try XCTUnwrap(store.loadCredentials().first)
         XCTAssertFalse(store.persistRotation(credential, expectedRefreshToken: "fake-refresh-token"))
     }
+
+    // MARK: - Silent/interactive Keychain split (mirrors ClaudeAuthStore)
+
+    /// A silent store (`allowsKeychainInteraction: false`) must never ask the
+    /// stub for an interactive read — the same guarantee
+    /// `KeychainSilentPathTests` verifies for Claude.
+    func testSilentStoreNeverRequestsAnInteractiveKeychainRead() {
+        let directory = TemporaryDirectory(self)
+        let keychain = StubKeychain(items: [
+            "Codex Auth\u{1}": ProviderFixtures.codexAuth(),
+        ])
+        let store = CodexAuthStore(
+            environment: StaticEnvironment(["CODEX_HOME": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: keychain,
+            allowsKeychainInteraction: false,
+            now: { self.now }
+        )
+
+        let credential = store.loadKeychainCredential()
+        XCTAssertNotNil(credential)
+        XCTAssertTrue(
+            keychain.dataReads.allSatisfy { !$0.allowInteraction },
+            "the silent store asked for an interactive read: \(keychain.dataReads)"
+        )
+    }
+
+    /// The interactive store (the default) still reads the same item — only
+    /// the silent one is restricted.
+    func testInteractiveStoreStillReadsTheKeychainItem() {
+        let directory = TemporaryDirectory(self)
+        let keychain = StubKeychain(items: [
+            "Codex Auth\u{1}": ProviderFixtures.codexAuth(accessToken: "keychain.token.sig"),
+        ])
+        let store = makeStore(directory: directory, keychain: keychain)
+
+        XCTAssertEqual(store.loadKeychainCredential()?.auth.tokens?.accessToken, "keychain.token.sig")
+        XCTAssertTrue(keychain.dataReads.contains { $0.allowInteraction })
+    }
+
+    /// The core access-denied case: the item is present (attributes probe
+    /// succeeds) but the silent read is refused — "logged in via Keychain,
+    /// permission not granted yet", the same distinction
+    /// `ClaudeAuthStore.keychainAccessIsDenied()` makes.
+    func testKeychainAccessIsDeniedWhenItemExistsButSilentReadIsRefused() {
+        let directory = TemporaryDirectory(self)
+        let keychain = StubKeychain(items: [
+            "Codex Auth\u{1}": ProviderFixtures.codexAuth(),
+        ])
+        keychain.silentReadError = .accessDenied
+        let store = CodexAuthStore(
+            environment: StaticEnvironment(["CODEX_HOME": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: keychain,
+            allowsKeychainInteraction: false,
+            now: { self.now }
+        )
+
+        XCTAssertTrue(store.keychainAccessIsDenied())
+        XCTAssertNil(store.loadKeychainCredential())
+    }
+
+    /// No Keychain item at all: must not be misreported as access-denied.
+    func testKeychainAccessIsNotDeniedWhenNoItemExists() {
+        let directory = TemporaryDirectory(self)
+        let store = makeStore(directory: directory)
+        XCTAssertFalse(store.keychainAccessIsDenied())
+    }
 }

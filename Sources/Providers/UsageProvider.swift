@@ -29,6 +29,10 @@ protocol UsageProvider: Sendable {
 enum UsageError: Error, Equatable, Sendable {
     /// No credential source found, or it holds no OAuth tokens at all.
     case notLoggedIn
+    /// A credential item exists, but reading it silently is not permitted yet:
+    /// the user must trigger one interactive read (Refresh Now) and grant
+    /// Keychain access ("Always Allow") so background polls can work.
+    case keychainAccessDenied
     /// Token invalid/expired and refresh failed — user must re-login in the CLI.
     case sessionExpired
     /// Token is valid for inference but lacks the scope needed for usage data
@@ -48,6 +52,7 @@ enum UsageError: Error, Equatable, Sendable {
     var userDescription: String {
         switch self {
         case .notLoggedIn: return "Источник токена не найден"
+        case .keychainAccessDenied: return "Нужно разрешение Keychain — нажмите Refresh Now"
         case .sessionExpired: return "Сессия истекла — залогиньтесь в CLI"
         case .missingScope: return "Токену не хватает прав для usage-данных"
         case .rateLimited: return "Слишком много запросов — пауза"

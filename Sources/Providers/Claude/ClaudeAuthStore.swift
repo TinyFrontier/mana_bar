@@ -167,6 +167,37 @@ struct ClaudeAuthStore: Sendable {
         return candidates
     }
 
+    /// Whether a Keychain candidate is confirmed present by the cheap
+    /// attributes-only probe, yet the same silent read `loadKeychainCredential()`
+    /// performs fails with `.accessDenied` rather than "no such item" — the
+    /// user *is* logged in via Claude Code, Mana just has not been granted
+    /// permission to read that Keychain item silently yet. One interactive
+    /// "Refresh Now" + "Always Allow" fixes this permanently (research doc:
+    /// silent-path Keychain fix). Distinct from a genuine `.notLoggedIn`,
+    /// where no candidate exists at all — that case must not be reported here.
+    func keychainAccessIsDenied() -> Bool {
+        for service in keychainServiceCandidates() {
+            for account in [currentUserAccount(), nil] {
+                guard keychain.genericPasswordExists(service: service, account: account) == true else {
+                    continue
+                }
+                do {
+                    _ = try keychain.readGenericPassword(
+                        service: service,
+                        account: account,
+                        allowInteraction: allowsKeychainInteraction
+                    )
+                } catch KeychainError.accessDenied {
+                    return true
+                } catch {
+                    // Any other outcome (readable, locked for an unrelated
+                    // reason, malformed) is not the permission case.
+                }
+            }
+        }
+        return false
+    }
+
     /// Cheap, local-only, prompt-free evidence that a login exists at all
     /// (ТЗ §4.2). Never reads a secret it does not have to and never hits the
     /// network.

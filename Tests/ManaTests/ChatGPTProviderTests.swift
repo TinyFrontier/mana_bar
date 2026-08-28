@@ -74,6 +74,54 @@ final class ChatGPTProviderTests: XCTestCase {
         await XCTAssertUsageErrorAsync(try await provider.fetchUsage(), .notLoggedIn)
     }
 
+    /// A `Codex Auth` Keychain item present but unreadable on the silent path
+    /// is a permission problem, not "not logged in" — mirrors the Claude
+    /// provider's `.keychainAccessDenied` distinction.
+    func testKeychainItemPresentButSilentlyUnreadableIsKeychainAccessDenied() async {
+        let directory = TemporaryDirectory(self)
+        let keychain = StubKeychain(items: [
+            "Codex Auth\u{1}": ProviderFixtures.codexAuth(),
+        ])
+        keychain.silentReadError = .accessDenied
+        let authStore = CodexAuthStore(
+            environment: StaticEnvironment(["CODEX_HOME": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: keychain,
+            allowsKeychainInteraction: false,
+            now: { self.now }
+        )
+        let http = StubHTTPClient([])
+        let provider = ChatGPTProvider(authStore: authStore, usageClient: CodexUsageClient(http: http), now: { self.now })
+
+        await XCTAssertUsageErrorAsync(try await provider.fetchUsage(), .keychainAccessDenied)
+        XCTAssertTrue(http.sentRequests.isEmpty, "a request was sent without a usable credential")
+    }
+
+    /// The primary source on a real machine — `auth.json` — must keep working
+    /// unaffected by the silent/interactive Keychain split: a readable file
+    /// credential is used even when the Keychain fallback would be denied.
+    func testFileCredentialIsUnaffectedByASilentlyDeniedKeychainFallback() async throws {
+        let directory = TemporaryDirectory(self)
+        directory.write(ProviderFixtures.codexAuth(accessToken: "file.token.sig"), to: "auth.json")
+        let keychain = StubKeychain(items: [
+            "Codex Auth\u{1}": ProviderFixtures.codexAuth(accessToken: "keychain.token.sig"),
+        ])
+        keychain.silentReadError = .accessDenied
+        let authStore = CodexAuthStore(
+            environment: StaticEnvironment(["CODEX_HOME": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: keychain,
+            allowsKeychainInteraction: false,
+            now: { self.now }
+        )
+        let http = StubHTTPClient(.json(ProviderFixtures.codexUsage))
+        let provider = ChatGPTProvider(authStore: authStore, usageClient: CodexUsageClient(http: http), now: { self.now })
+
+        let usage = try await provider.fetchUsage()
+        XCTAssertEqual(usage.window(.session)?.usedPercent, 17.5)
+        XCTAssertEqual(http.sentRequests.first?.headers["Authorization"], "Bearer file.token.sig")
+    }
+
     func testRateLimitSurfacesRetryAfter() async {
         let directory = TemporaryDirectory(self)
         directory.write(ProviderFixtures.codexAuth(), to: "auth.json")

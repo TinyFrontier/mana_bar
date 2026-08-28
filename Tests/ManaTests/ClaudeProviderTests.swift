@@ -73,6 +73,37 @@ final class ClaudeProviderTests: XCTestCase {
         await XCTAssertUsageErrorAsync(try await provider.fetchUsage(), .notLoggedIn)
     }
 
+    /// A Keychain item present but unreadable on the silent path is a
+    /// permission problem, not "not logged in" — the login exists, only the
+    /// one-time Keychain grant is missing (research doc: silent-path fix).
+    /// Uses a silent (`allowsKeychainInteraction: false`) store directly,
+    /// since `makeProvider`'s default store is interactive.
+    func testKeychainItemPresentButSilentlyUnreadableIsKeychainAccessDenied() async throws {
+        let directory = TemporaryDirectory(self)
+        let probeStore = ClaudeAuthStore(
+            environment: StaticEnvironment(["CLAUDE_CONFIG_DIR": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: StubKeychain()
+        )
+        let service = try XCTUnwrap(probeStore.keychainServiceCandidates().first)
+        let keychain = StubKeychain(items: [
+            "\(service)\u{1}\(NSUserName())": ProviderFixtures.claudeCredentials(),
+        ])
+        keychain.silentReadError = .accessDenied
+        let http = StubHTTPClient([])
+        let silentStore = ClaudeAuthStore(
+            environment: StaticEnvironment(["CLAUDE_CONFIG_DIR": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: keychain,
+            allowsDesktopFallback: false,
+            allowsKeychainInteraction: false
+        )
+        let provider = ClaudeProvider(authStore: silentStore, usageClient: ClaudeUsageClient(http: http), now: { self.now })
+
+        await XCTAssertUsageErrorAsync(try await provider.fetchUsage(), .keychainAccessDenied)
+        XCTAssertTrue(http.sentRequests.isEmpty, "a request was sent without a usable credential")
+    }
+
     func testTokenWithoutProfileScopeIsMissingScopeAndSkipsTheNetwork() async {
         let directory = TemporaryDirectory(self)
         directory.write(

@@ -14,6 +14,14 @@ struct DetailCardView: View {
     /// Ring/bar color thresholds (ТЗ §3.3, §6), same value `RingView` uses —
     /// threaded in by `PanelView` from `AppSettings`.
     var thresholds: UsageThresholds = .default
+    /// Error-state action button (ТЗ §4.3): triggers the same interactive
+    /// manual refresh as the status-bar "Refresh Now" menu item, for both the
+    /// `.keychainAccessDenied` "Grant access" button and every other error's
+    /// "Re-login via CLI" button — Mana never collects a token itself, so
+    /// either way the next successful poll is what actually clears the error.
+    /// Defaults to a no-op for Previews and other contexts with nothing to
+    /// wire it to.
+    var onErrorAction: () -> Void = {}
 
     private let cardWidth: CGFloat = 300
 
@@ -162,6 +170,11 @@ struct DetailCardView: View {
 
     // MARK: Error state (design-spec.md §3.7.4, §8.2; ТЗ §4.3)
 
+    private var isKeychainAccessDenied: Bool {
+        if case .keychainAccessDenied = status.error { return true }
+        return false
+    }
+
     private var errorSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(status.error?.userDescription ?? "")
@@ -169,8 +182,18 @@ struct DetailCardView: View {
                 .lineSpacing(13 * 0.45)
                 .foregroundStyle(ManaColor.textFaint)
 
-            Button(action: reloginTapped) {
-                Text("Re-login via CLI")
+            if isKeychainAccessDenied {
+                // ТЗ addendum (silent-path Keychain fix): the permission is a
+                // one-time grant, not a re-login — spell that out so the user
+                // knows a single click fixes it for good.
+                Text("Разрешение выдаётся один раз: подтвердите «Always Allow» в системном диалоге Keychain.")
+                    .font(.system(size: 11.5))
+                    .lineSpacing(11.5 * 0.4)
+                    .foregroundStyle(ManaColor.textVeryFaint)
+            }
+
+            Button(action: onErrorAction) {
+                Text(isKeychainAccessDenied ? "Grant access" : "Re-login via CLI")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(ManaColor.reloginText)
                     .padding(.horizontal, 14)
@@ -181,14 +204,6 @@ struct DetailCardView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .padding(.top, 16)
-    }
-
-    private func reloginTapped() {
-        // TODO (stub, per task brief): Mana never collects a token itself
-        // (ТЗ §4.3) — this hints the user to run `claude`/`codex` in a
-        // terminal; Mana re-detects credentials on its next poll with no
-        // further action here. Real behavior (e.g. opening Terminal with
-        // the right command pre-filled) lands with provider wiring.
     }
 }
 
@@ -221,6 +236,7 @@ private struct CardArrow: Shape {
 #Preview {
     HStack(alignment: .top, spacing: 24) {
         DetailCardView(serviceID: .claude, status: .ready(.placeholder))
+        DetailCardView(serviceID: .claude, status: .unavailable(.keychainAccessDenied))
         DetailCardView(serviceID: .chatgpt, status: .stale(.placeholder, .connectionFailed))
         DetailCardView(serviceID: .claude, status: .loading)
     }

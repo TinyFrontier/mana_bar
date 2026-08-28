@@ -13,8 +13,8 @@ import SwiftUI
 struct OnboardingView: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var accessibilityGranted = AXIsProcessTrusted()
-    @State private var claudeFound: Bool?
-    @State private var chatgptFound: Bool?
+    @State private var claudeFinding: CredentialSourceStatus.Finding?
+    @State private var chatgptFinding: CredentialSourceStatus.Finding?
 
     /// Called when the user dismisses the screen ("Done"). `AppDelegate`
     /// closes the hosting window from this.
@@ -102,8 +102,8 @@ struct OnboardingView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            credentialRow(serviceID: .claude, found: claudeFound)
-            credentialRow(serviceID: .chatgpt, found: chatgptFound)
+            credentialRow(serviceID: .claude, finding: claudeFinding)
+            credentialRow(serviceID: .chatgpt, finding: chatgptFinding)
 
             Button("Recheck") {
                 Task { await refreshCredentialStatus() }
@@ -111,14 +111,24 @@ struct OnboardingView: View {
         }
     }
 
-    private func credentialRow(serviceID: ServiceID, found: Bool?) -> some View {
+    private func credentialRow(serviceID: ServiceID, finding: CredentialSourceStatus.Finding?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
-                statusRow(granted: found ?? false, foundLabel: "Found", missingLabel: found == nil ? "Checking…" : "Not found")
+                statusRow(
+                    granted: finding == .found,
+                    foundLabel: "Found",
+                    missingLabel: finding == nil ? "Checking…" : (finding == .needsKeychainPermission ? "Needs permission" : "Not found")
+                )
                 Text(serviceID.displayName).font(.callout).bold()
             }
-            if found == false {
+            if finding == .notFound {
                 Text(CredentialSourceStatus.hint(serviceID))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if finding == .needsKeychainPermission {
+                // ТЗ §7 addendum: the login is already there — this is a
+                // one-time Keychain grant, not an install/login step.
+                Text(CredentialSourceStatus.permissionHint(serviceID))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -148,12 +158,12 @@ struct OnboardingView: View {
     }
 
     private func refreshCredentialStatus() async {
-        claudeFound = nil
-        chatgptFound = nil
-        async let claude = CredentialSourceStatus.check(.claude)
-        async let chatgpt = CredentialSourceStatus.check(.chatgpt)
-        claudeFound = await claude
-        chatgptFound = await chatgpt
+        claudeFinding = nil
+        chatgptFinding = nil
+        async let claude = CredentialSourceStatus.status(.claude)
+        async let chatgpt = CredentialSourceStatus.status(.chatgpt)
+        claudeFinding = await claude
+        chatgptFinding = await chatgpt
     }
 }
 

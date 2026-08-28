@@ -61,6 +61,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         usageCoordinator = coordinator
         coordinator.start()
 
+        // Wires the detail card's error-state action button (DetailCardView)
+        // to the same interactive "Refresh Now" path as the status-bar menu
+        // item, without PanelModel needing any knowledge of the coordinator.
+        panelModel.onManualRefreshRequested = { [weak self] in
+            Task { await self?.usageCoordinator?.refreshNow() }
+        }
+
         statusBarController = StatusBarController(
             togglePanel: { [weak self] in self?.toggleManualPanel() },
             refreshNow: { [weak self] in
@@ -105,17 +112,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Builds the two providers (Claude, ChatGPT), each with a silent
     /// instance for background/automatic polls and an interactive one used
     /// only by the "Refresh Now" menu action (ТЗ §4.2: background polls must
-    /// never raise a Keychain dialog). ChatGPT's `CodexAuthStore` has no such
-    /// interactive/silent distinction, so both sides share one instance.
+    /// never raise a Keychain dialog). Both `ClaudeAuthStore` and
+    /// `CodexAuthStore` support this split via `allowsKeychainInteraction`.
     private static func makeUsageCoordinator(model: PanelModel) -> UsageCoordinator {
         let claudeSilentAuth = ClaudeAuthStore(allowsKeychainInteraction: false)
         let claudeInteractiveAuth = ClaudeAuthStore(allowsKeychainInteraction: true)
+        let codexSilentAuth = CodexAuthStore(allowsKeychainInteraction: false)
+        let codexInteractiveAuth = CodexAuthStore(allowsKeychainInteraction: true)
         let providers: [ServiceID: UsageCoordinator.ProviderPair] = [
             .claude: UsageCoordinator.ProviderPair(
                 silent: ClaudeProvider(authStore: claudeSilentAuth),
                 interactive: ClaudeProvider(authStore: claudeInteractiveAuth)
             ),
-            .chatgpt: UsageCoordinator.ProviderPair(ChatGPTProvider()),
+            .chatgpt: UsageCoordinator.ProviderPair(
+                silent: ChatGPTProvider(authStore: codexSilentAuth),
+                interactive: ChatGPTProvider(authStore: codexInteractiveAuth)
+            ),
         ]
         return UsageCoordinator(
             model: model,

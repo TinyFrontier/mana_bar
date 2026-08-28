@@ -16,6 +16,15 @@ final class PanelModel: ObservableObject {
 
     @Published private(set) var statuses: [ServiceID: ServiceStatus]
 
+    /// Triggers an interactive manual refresh (ТЗ §4.2) — the same path the
+    /// status-bar "Refresh Now" menu item uses. Set by `AppDelegate` to call
+    /// `UsageCoordinator.refreshNow()`; `DetailCardView`'s error-state action
+    /// button calls it via `requestManualRefresh()` rather than reaching for
+    /// the coordinator itself, so this type keeps no knowledge of the
+    /// provider/coordinator layer. `nil` in mock/preview contexts, where the
+    /// button is a harmless no-op.
+    var onManualRefreshRequested: (() -> Void)?
+
     init(serviceOrder: [ServiceID], statuses: [ServiceID: ServiceStatus]) {
         self.serviceOrder = serviceOrder
         self.statuses = statuses
@@ -23,6 +32,14 @@ final class PanelModel: ObservableObject {
 
     func status(for id: ServiceID) -> ServiceStatus {
         statuses[id] ?? .loading
+    }
+
+    /// Requests an interactive refresh of every service (ТЗ §4.3, §4.2) —
+    /// called by the detail card's error-state action button (grant access /
+    /// re-login) for both `.claude` and `.chatgpt`, since there is exactly
+    /// one interactive-refresh path.
+    func requestManualRefresh() {
+        onManualRefreshRequested?()
     }
 
     func setStatus(_ status: ServiceStatus, for id: ServiceID) {

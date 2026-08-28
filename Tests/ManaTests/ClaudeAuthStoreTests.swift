@@ -295,4 +295,58 @@ final class ClaudeAuthStoreTests: XCTestCase {
         let keychain = StubKeychain(items: ["\(service)\u{1}": "irrelevant"])
         XCTAssertTrue(makeStore(directory: directory, keychain: keychain).hasCredentialMaterial())
     }
+
+    // MARK: - Keychain access-denied diagnosis
+
+    /// The core case: an item is present (attributes probe succeeds) but the
+    /// silent read is denied — this is "logged in, permission not granted
+    /// yet", not "not logged in".
+    func testKeychainAccessIsDeniedWhenItemExistsButSilentReadIsRefused() throws {
+        let directory = TemporaryDirectory(self)
+        let probe = makeStore(directory: directory)
+        let service = try XCTUnwrap(probe.keychainServiceCandidates().first)
+        let keychain = StubKeychain(items: [
+            "\(service)\u{1}\(NSUserName())": ProviderFixtures.claudeCredentials(),
+        ])
+        keychain.silentReadError = .accessDenied
+
+        let store = ClaudeAuthStore(
+            environment: StaticEnvironment(["CLAUDE_CONFIG_DIR": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: keychain,
+            allowsDesktopFallback: false,
+            allowsKeychainInteraction: false
+        )
+
+        XCTAssertTrue(store.keychainAccessIsDenied())
+        XCTAssertTrue(store.loadCredentials().isEmpty)
+    }
+
+    /// No Keychain item at all (nor a locked-but-present one): must not be
+    /// misreported as an access-denied case.
+    func testKeychainAccessIsNotDeniedWhenNoItemExists() {
+        let directory = TemporaryDirectory(self)
+        let store = makeStore(directory: directory)
+        XCTAssertFalse(store.keychainAccessIsDenied())
+    }
+
+    /// A readable item (interactive store, or one Mana already has permission
+    /// for) must never be diagnosed as access-denied, even though it exists.
+    func testKeychainAccessIsNotDeniedWhenTheItemIsReadable() throws {
+        let directory = TemporaryDirectory(self)
+        let probe = makeStore(directory: directory)
+        let service = try XCTUnwrap(probe.keychainServiceCandidates().first)
+        let keychain = StubKeychain(items: [
+            "\(service)\u{1}\(NSUserName())": ProviderFixtures.claudeCredentials(),
+        ])
+        let store = ClaudeAuthStore(
+            environment: StaticEnvironment(["CLAUDE_CONFIG_DIR": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: keychain,
+            allowsDesktopFallback: false,
+            allowsKeychainInteraction: false
+        )
+
+        XCTAssertFalse(store.keychainAccessIsDenied())
+    }
 }
