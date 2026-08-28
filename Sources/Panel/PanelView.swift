@@ -13,6 +13,10 @@ import SwiftUI
 /// know about card geometry itself.
 struct PanelView: View {
     @ObservedObject var model: PanelModel
+    /// Live-observed so a Settings change (thresholds, percent-label
+    /// toggle) is reflected the moment the panel is next shown, with no
+    /// extra wiring beyond this (ТЗ §6).
+    @ObservedObject private var settings = AppSettings.shared
     @State private var hoveredServiceID: ServiceID?
 
     /// - Parameter initiallyHovered: seeds the hover state so a specific
@@ -25,10 +29,14 @@ struct PanelView: View {
 
     private var services: [ServiceID] { model.serviceOrder }
 
+    private var thresholds: UsageThresholds {
+        UsageThresholds(warning: settings.warningThreshold, critical: settings.criticalThreshold)
+    }
+
     var body: some View {
         ZStack(alignment: .trailing) {
             if let hoveredServiceID, let index = services.firstIndex(of: hoveredServiceID) {
-                DetailCardView(serviceID: hoveredServiceID, status: model.status(for: hoveredServiceID))
+                DetailCardView(serviceID: hoveredServiceID, status: model.status(for: hoveredServiceID), thresholds: thresholds)
                     .offset(
                         x: -(PanelLayoutMetrics.panelWidth + PanelLayoutMetrics.cardGap),
                         y: PanelLayoutMetrics.ringCenterOffset(index: index, count: services.count)
@@ -53,7 +61,7 @@ struct PanelView: View {
     private var island: some View {
         VStack(spacing: PanelLayoutMetrics.ringGap) {
             ForEach(services) { serviceID in
-                RingView(serviceID: serviceID, status: model.status(for: serviceID))
+                RingView(serviceID: serviceID, status: model.status(for: serviceID), thresholds: thresholds, showPercent: settings.showPercentUnderRings)
                     .onHover { isHovering in
                         if isHovering {
                             hoveredServiceID = serviceID

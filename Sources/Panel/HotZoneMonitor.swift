@@ -28,8 +28,16 @@ final class HotZoneMonitor {
     /// Height of the hot zone == current panel content height; the owner
     /// (AppDelegate) keeps this in sync with `PanelModel.serviceOrder.count`.
     var panelHeight: CGFloat = PanelLayoutMetrics.panelHeight(serviceCount: 2)
-    /// Which edge the panel docks to (ТЗ §6). TODO: read from AppSettings.
+    /// Which edge the panel docks to (ТЗ §6). Kept as a plain pushed-in
+    /// value rather than reading `AppSettings.shared` directly — this type
+    /// isn't `@MainActor` (it's driven by a global `NSEvent` monitor
+    /// callback) and stays that way on purpose, so `AppDelegate` copies the
+    /// current setting in on launch and again on every change.
     var edge: PanelEdge = .right
+    /// Vertical placement along the edge (ТЗ §6), same plain-pushed-in
+    /// pattern as `edge` — must track `PanelWindow`'s own placement or the
+    /// invisible hot-zone strip and the visible panel drift apart.
+    var verticalPosition: PanelVerticalPosition = .center
 
     var appearDelay: TimeInterval = 0.12
     var disappearDelay: TimeInterval = 0.35
@@ -108,7 +116,8 @@ final class HotZoneMonitor {
             screenFrame: screen.frame,
             panelHeight: panelHeight,
             width: hotZoneWidth,
-            edge: edge
+            edge: edge,
+            verticalPosition: verticalPosition
         )
         if HotZoneGeometry.contains(point, in: hotZone) {
             return true

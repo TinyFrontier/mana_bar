@@ -15,13 +15,30 @@ enum HotZoneGeometry {
     ///   - panelHeight: current panel content height (varies with service count).
     ///   - width: hot-zone strip width, 2–4px per ТЗ §3.1 (default 3).
     ///   - edge: which screen edge the panel docks to (ТЗ §6, `PanelEdge`).
-    static func rect(screenFrame: CGRect, panelHeight: CGFloat, width: CGFloat = 3, edge: PanelEdge = .right) -> CGRect {
+    ///   - verticalPosition: vertical placement along the edge (ТЗ §6) —
+    ///     must match `PanelWindow`'s own placement, or the invisible strip
+    ///     and the visible panel drift apart.
+    ///   - margin: gap from the screen's top/bottom edge for the
+    ///     `.top`/`.bottom` cases; ignored for `.center`.
+    static func rect(
+        screenFrame: CGRect,
+        panelHeight: CGFloat,
+        width: CGFloat = 3,
+        edge: PanelEdge = .right,
+        verticalPosition: PanelVerticalPosition = .center,
+        margin: CGFloat = PanelLayoutMetrics.verticalEdgeMargin
+    ) -> CGRect {
         let x: CGFloat
         switch edge {
         case .right: x = screenFrame.maxX - width
         case .left: x = screenFrame.minX
         }
-        let y = screenFrame.midY - panelHeight / 2
+        let y: CGFloat
+        switch verticalPosition {
+        case .center: y = screenFrame.midY - panelHeight / 2
+        case .top: y = screenFrame.maxY - margin - panelHeight
+        case .bottom: y = screenFrame.minY + margin
+        }
         return CGRect(x: x, y: y, width: width, height: panelHeight)
     }
 

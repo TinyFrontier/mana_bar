@@ -11,6 +11,9 @@ import SwiftUI
 struct DetailCardView: View {
     let serviceID: ServiceID
     let status: ServiceStatus
+    /// Ring/bar color thresholds (ТЗ §3.3, §6), same value `RingView` uses —
+    /// threaded in by `PanelView` from `AppSettings`.
+    var thresholds: UsageThresholds = .default
 
     private let cardWidth: CGFloat = 300
 
@@ -103,7 +106,7 @@ struct DetailCardView: View {
     private func sectionRow(title: String, window: UsageWindow, style: ResetStyle, animatesFill: Bool) -> some View {
         let percent = window.usedPercent
         let fraction = min(max(percent / 100, 0), 1)
-        let level = UsageLevel.forPercent(percent)
+        let level = UsageLevel.forPercent(percent, thresholds: thresholds)
 
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {

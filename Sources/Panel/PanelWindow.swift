@@ -78,24 +78,48 @@ final class PanelWindow: NSPanel {
         let size = contentSize
         return NSRect(
             x: screen.frame.maxX,
-            y: screen.frame.midY - size.height / 2,
+            y: dockedY(on: screen, size: size),
             width: size.width,
             height: size.height
         )
     }
 
     /// Docked frame: right-aligned to the edge (ТЗ §3.2 — panel prижата к
-    /// краю), vertically centered on the screen (ТЗ §3.1).
-    /// TODO: honor `AppSettings.panelEdge` / `.verticalPosition` instead of
-    /// always docking right/center.
+    /// краю), vertically positioned per `AppSettings.verticalPosition`
+    /// (ТЗ §3.1, §6). TODO: honor `AppSettings.panelEdge` for a real left
+    /// edge — see `SettingsView`, disabled there as "coming soon"; docking
+    /// stays right-only here so that control's disabled state is honest.
     private func shownFrame(on screen: NSScreen) -> NSRect {
         let size = contentSize
         return NSRect(
             x: screen.frame.maxX - size.width,
-            y: screen.frame.midY - size.height / 2,
+            y: dockedY(on: screen, size: size),
             width: size.width,
             height: size.height
         )
+    }
+
+    /// Vertical origin of the window's content frame for the current
+    /// `AppSettings.verticalPosition` (ТЗ §6). The window's own content
+    /// height (`size.height`) is much taller than the visible island (extra
+    /// space is reserved for the detail-card flyout, see
+    /// `PanelLayoutMetrics.containerHeight`), and `PanelView` always centers
+    /// the island vertically within that container — so `.top`/`.bottom`
+    /// target where the *island* (not the oversized container) should sit,
+    /// then back out the container's origin from that.
+    private func dockedY(on screen: NSScreen, size: NSSize) -> CGFloat {
+        let islandHeight = PanelLayoutMetrics.panelHeight(serviceCount: model.serviceOrder.count)
+        let margin = PanelLayoutMetrics.verticalEdgeMargin
+        switch AppSettings.shared.verticalPosition {
+        case .center:
+            return screen.frame.midY - size.height / 2
+        case .top:
+            let islandCenterY = screen.frame.maxY - margin - islandHeight / 2
+            return islandCenterY - size.height / 2
+        case .bottom:
+            let islandCenterY = screen.frame.minY + margin + islandHeight / 2
+            return islandCenterY - size.height / 2
+        }
     }
 
     // design-spec.md §6.1/§6.2: 230ms, cubic-bezier(0.22, 0.7, 0.3, 1), both directions.
