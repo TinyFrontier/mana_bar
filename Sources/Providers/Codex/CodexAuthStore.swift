@@ -184,7 +184,10 @@ struct CodexAuthStore: Sendable {
     /// Meaningful only once the `auth.json` file sources have also come up
     /// empty (checked by the caller).
     func keychainAccessIsDenied() -> Bool {
-        guard keychain.genericPasswordExists(service: Self.keychainService, account: nil) == true else {
+        // A definite `false` (`errSecItemNotFound`) rules the item out; `nil`
+        // means the probe could not answer and is not evidence of absence —
+        // see `ClaudeAuthStore.keychainAccessIsDenied()`.
+        if keychain.genericPasswordExists(service: Self.keychainService, account: nil) == false {
             return false
         }
         do {

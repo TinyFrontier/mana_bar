@@ -345,4 +345,20 @@ final class CodexAuthStoreTests: XCTestCase {
         let store = makeStore(directory: directory)
         XCTAssertFalse(store.keychainAccessIsDenied())
     }
+    /// Mirrors `ClaudeAuthStoreTests`: a probe that cannot answer is not
+    /// evidence that the item is absent.
+    func testKeychainAccessIsDeniedWhenTheExistenceProbeCannotAnswer() {
+        let directory = TemporaryDirectory(self)
+        let keychain = StubKeychain(items: ["Codex Auth\u{1}": ProviderFixtures.codexAuth()])
+        keychain.silentReadError = .accessDenied
+        keychain.existenceProbeIsInconclusive = true
+        let store = CodexAuthStore(
+            environment: StaticEnvironment(["CODEX_HOME": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: keychain,
+            allowsKeychainInteraction: false
+        )
+
+        XCTAssertTrue(store.keychainAccessIsDenied())
+    }
 }

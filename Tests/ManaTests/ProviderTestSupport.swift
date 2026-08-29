@@ -86,6 +86,10 @@ final class StubKeychain: KeychainReading, @unchecked Sendable {
     var silentReadError: KeychainError?
     /// When true, writes throw `.accessDenied`.
     var refusesWrites = false
+    /// When true, the attributes-only probe answers `nil` — "could not tell",
+    /// the shape it takes when the silent gate is held by an open interactive
+    /// dialog or `securityd` refuses the attributes query outright.
+    var existenceProbeIsInconclusive = false
 
     init(items: [String: String] = [:]) {
         self.items = items
@@ -112,6 +116,7 @@ final class StubKeychain: KeychainReading, @unchecked Sendable {
     }
 
     func genericPasswordExists(service: String, account: String?) -> Bool? {
+        if existenceProbeIsInconclusive { return nil }
         lock.lock()
         defer { lock.unlock() }
         return items[Self.key(service, account)] != nil || items[Self.key(service, nil)] != nil

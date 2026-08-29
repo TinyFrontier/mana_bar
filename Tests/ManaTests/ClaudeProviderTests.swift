@@ -104,6 +104,37 @@ final class ClaudeProviderTests: XCTestCase {
         XCTAssertTrue(http.sentRequests.isEmpty, "a request was sent without a usable credential")
     }
 
+    /// Same state, but with an existence probe that cannot answer — the shape
+    /// seen in the field when an interactive dialog holds the silent gate. The
+    /// card must still say "grant needed", not "Источник токена не найден":
+    /// the user is logged in, and a re-login would not fix anything.
+    func testUnanswerableExistenceProbeStillReportsKeychainAccessDenied() async throws {
+        let directory = TemporaryDirectory(self)
+        let probeStore = ClaudeAuthStore(
+            environment: StaticEnvironment(["CLAUDE_CONFIG_DIR": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: StubKeychain()
+        )
+        let service = try XCTUnwrap(probeStore.keychainServiceCandidates().first)
+        let keychain = StubKeychain(items: [
+            "\(service)\u{1}\(NSUserName())": ProviderFixtures.claudeCredentials(),
+        ])
+        keychain.silentReadError = .accessDenied
+        keychain.existenceProbeIsInconclusive = true
+        let http = StubHTTPClient([])
+        let silentStore = ClaudeAuthStore(
+            environment: StaticEnvironment(["CLAUDE_CONFIG_DIR": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: keychain,
+            allowsDesktopFallback: false,
+            allowsKeychainInteraction: false
+        )
+        let provider = ClaudeProvider(authStore: silentStore, usageClient: ClaudeUsageClient(http: http), now: { self.now })
+
+        await XCTAssertUsageErrorAsync(try await provider.fetchUsage(), .keychainAccessDenied)
+        XCTAssertTrue(http.sentRequests.isEmpty, "a request was sent without a usable credential")
+    }
+
     func testTokenWithoutProfileScopeIsMissingScopeAndSkipsTheNetwork() async {
         let directory = TemporaryDirectory(self)
         directory.write(

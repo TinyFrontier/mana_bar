@@ -199,7 +199,16 @@ struct ClaudeAuthStore: Sendable {
     func keychainAccessIsDenied() -> Bool {
         for service in keychainServiceCandidates() {
             for account in [currentUserAccount(), nil] {
-                guard keychain.genericPasswordExists(service: service, account: account) == true else {
+                // Only a definite `false` — `errSecItemNotFound` — rules this
+                // candidate out. `nil` means the probe could not answer (the
+                // silent gate was held by an open interactive dialog, or
+                // `securityd` refused the attributes query outright), and
+                // treating "could not answer" as "not there" is exactly how a
+                // logged-in user ends up reading "Источник токена не найден"
+                // when the real state is a missing one-time grant. The read
+                // below still separates the two: denied throws, absent does
+                // not.
+                if keychain.genericPasswordExists(service: service, account: account) == false {
                     continue
                 }
                 do {

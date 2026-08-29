@@ -346,6 +346,32 @@ final class ClaudeAuthStoreTests: XCTestCase {
         XCTAssertTrue(store.loadCredentials().isEmpty)
     }
 
+    /// The existence probe can fail to answer at all — it loses the silent gate
+    /// to an open interactive dialog, or `securityd` refuses the attributes
+    /// query. "Could not tell" is not "not there": treating it as absence is
+    /// what made a logged-in user see "Источник токена не найден" instead of
+    /// the one-time-grant prompt. The silent read still separates the two.
+    func testKeychainAccessIsDeniedWhenTheExistenceProbeCannotAnswer() throws {
+        let directory = TemporaryDirectory(self)
+        let probe = makeStore(directory: directory)
+        let service = try XCTUnwrap(probe.keychainServiceCandidates().first)
+        let keychain = StubKeychain(items: [
+            "\(service)\u{1}\(NSUserName())": ProviderFixtures.claudeCredentials(),
+        ])
+        keychain.silentReadError = .accessDenied
+        keychain.existenceProbeIsInconclusive = true
+
+        let store = ClaudeAuthStore(
+            environment: StaticEnvironment(["CLAUDE_CONFIG_DIR": directory.path]),
+            files: LocalTextFileAccessor(),
+            keychain: keychain,
+            allowsDesktopFallback: false,
+            allowsKeychainInteraction: false
+        )
+
+        XCTAssertTrue(store.keychainAccessIsDenied())
+    }
+
     /// No Keychain item at all (nor a locked-but-present one): must not be
     /// misreported as an access-denied case.
     func testKeychainAccessIsNotDeniedWhenNoItemExists() {
