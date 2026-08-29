@@ -154,7 +154,11 @@ if [[ -d "$TAP_DIR/Casks" ]]; then
   cp "$CASK_SOURCE" "$TAP_DIR/Casks/mana.rb"
   echo "copied cask into $TAP_DIR/Casks/mana.rb"
 
-  if git -C "$TAP_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  # Must be the tap's *own* checkout: a tap installed by `brew tap` sits inside
+  # /opt/homebrew, which is itself a git repository, so a bare `rev-parse`
+  # succeeds there and would commit into Homebrew's own tree.
+  TAP_TOPLEVEL="$(git -C "$TAP_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ "$TAP_TOPLEVEL" == "$TAP_DIR" ]]; then
     git -C "$TAP_DIR" add Casks/mana.rb
     git -C "$TAP_DIR" commit -m "mana $VERSION"
     if git -C "$TAP_DIR" remote get-url origin >/dev/null 2>&1; then
@@ -164,7 +168,7 @@ if [[ -d "$TAP_DIR/Casks" ]]; then
       echo "tap has no 'origin' remote — push it yourself"
     fi
   else
-    echo "tap is not a git checkout — commit and push it yourself"
+    echo "$TAP_DIR is not its own git checkout — commit and push the cask yourself"
   fi
 else
   echo "no tap checkout at $TAP_DIR — set MANA_TAP_DIR, or copy $CASK_SOURCE into the tap yourself"
