@@ -57,22 +57,15 @@ struct SettingsView: View {
 
     private var panelSection: some View {
         Section("Panel") {
-            VStack(alignment: .leading, spacing: 4) {
-                // Only "Right" is an offered tag — `settings.panelEdge` can
-                // never be driven to `.left` through this control, so it's
-                // physically impossible for this screen to break the right
-                // edge. Mirroring the island/card flyout for a real left
-                // edge is a genuine layout change (rounded corners, card
-                // offset direction, and PanelWindow's hidden/shown frame
-                // math all currently assume "right"); left stays a disabled
-                // placeholder below until that lands.
-                // TODO: wire `PanelEdge.left` here once PanelWindow/PanelView
-                // support it.
-                Picker("Edge", selection: $settings.panelEdge) {
-                    Text("Right").tag(PanelEdge.right)
-                }
-                Toggle("Left edge (coming soon)", isOn: .constant(false))
-                    .disabled(true)
+            // `PanelWindow.dockEdge` and `PanelView`'s layout (island
+            // alignment, card offset direction, rounded corners, arrow side)
+            // both read `AppSettings.shared.panelEdge` live, so flipping this
+            // picker mirrors the whole panel — including while it's
+            // currently visible — via the existing `$panelEdge` subscription
+            // in `AppDelegate.observeSettings()` (ТЗ §6).
+            Picker("Edge", selection: $settings.panelEdge) {
+                Text("Right").tag(PanelEdge.right)
+                Text("Left").tag(PanelEdge.left)
             }
 
             Picker("Vertical position", selection: $settings.verticalPosition) {

@@ -85,6 +85,5 @@ xcodebuild -project Mana.xcodeproj -scheme Mana -configuration Debug test -desti
 - **Settings/Notifications**: persisted `AppSettings` wired live;
   UNUserNotificationCenter thresholds with per-window cooldown.
 
-Known TODOs: left screen edge (Settings control disabled), explicit
-monitor picker, deep multi-monitor/Spaces handling, .dmg
-packaging/signing/notarization.
+Known TODOs: explicit monitor picker, deep multi-monitor/Spaces
+handling, .dmg packaging/signing/notarization.

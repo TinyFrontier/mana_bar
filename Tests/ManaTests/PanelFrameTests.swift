@@ -59,6 +59,32 @@ final class PanelFrameTests: XCTestCase {
         XCTAssertEqual(docked.minX, screen.minX, accuracy: 0.001)
     }
 
+    /// Same coverage as `testDockedFrameRightEdgeMatchesScreenMaxX`, mirrored
+    /// for `.left` — including a second-display-to-the-left screen with a
+    /// negative origin, the case most likely to break a `minX`/`maxX`
+    /// mix-up.
+    func testDockedFrameLeftEdgeMatchesScreenMinXAcrossScreens() {
+        let screens: [CGRect] = [
+            CGRect(x: 0, y: 0, width: 1440, height: 900),          // built-in, main
+            CGRect(x: 1440, y: 0, width: 2560, height: 1440),      // second display, to the right
+            CGRect(x: -2560, y: -300, width: 2560, height: 1440),  // second display, to the left
+            CGRect(x: 0, y: 0, width: 3456, height: 2234),         // 16" notch-height screen
+        ]
+
+        for screen in screens {
+            let docked = frame(screen: screen, edge: .left)
+            XCTAssertEqual(docked.minX, screen.minX, accuracy: 0.001, "left edge must be flush on \(screen)")
+            XCTAssertEqual(docked.width, PanelLayoutMetrics.containerWidth(), accuracy: 0.001)
+            XCTAssertEqual(
+                docked.height,
+                PanelLayoutMetrics.containerHeight(serviceCount: serviceCount),
+                accuracy: 0.001
+            )
+            // Fully on-screen horizontally: nothing spills onto a neighbouring display.
+            XCTAssertLessThanOrEqual(docked.maxX, screen.maxX)
+        }
+    }
+
     // MARK: - Vertical: follows `PanelVerticalPosition` via the island, not the container
 
     /// The container is much taller than the visible island; `.top`/`.bottom`
@@ -105,6 +131,30 @@ final class PanelFrameTests: XCTestCase {
         )
     }
 
+    /// `.left` docking must follow the exact same vertical math as `.right`
+    /// — only the horizontal edge changes — on a multi-monitor screen with a
+    /// negative origin (the case most likely to expose a `minY`/`maxY`
+    /// mix-up specific to the left-edge branch).
+    func testVerticalPositionsForLeftEdgeOnNegativeOriginScreen() {
+        let screen = CGRect(x: -2560, y: -300, width: 2560, height: 1440)
+        let islandHeight = PanelLayoutMetrics.panelHeight(serviceCount: serviceCount)
+        let margin = PanelLayoutMetrics.verticalEdgeMargin
+
+        let centered = frame(screen: screen, position: .center, edge: .left)
+        XCTAssertEqual(islandCenterY(in: centered), screen.midY, accuracy: 0.001)
+
+        let top = frame(screen: screen, position: .top, edge: .left)
+        XCTAssertEqual(islandCenterY(in: top), screen.maxY - margin - islandHeight / 2, accuracy: 0.001)
+
+        let bottom = frame(screen: screen, position: .bottom, edge: .left)
+        XCTAssertEqual(islandCenterY(in: bottom), screen.minY + margin + islandHeight / 2, accuracy: 0.001)
+
+        // Every vertical placement keeps the same flush left edge.
+        for docked in [centered, top, bottom] {
+            XCTAssertEqual(docked.minX, screen.minX, accuracy: 0.001)
+        }
+    }
+
     // MARK: - Vertical offset (ТЗ §6 "свободное смещение")
 
     /// A moderate offset just shifts the island by exactly that many points
@@ -127,6 +177,24 @@ final class PanelFrameTests: XCTestCase {
 
         // The horizontal edge and container size are unaffected.
         XCTAssertEqual(shiftedUp.maxX, screen.maxX, accuracy: 0.001)
+        XCTAssertEqual(shiftedUp.size, unshifted.size)
+    }
+
+    /// Same shift, mirrored for `.left` — the vertical offset math is
+    /// edge-independent, but this locks that down explicitly rather than
+    /// relying on `.right` coverage alone.
+    func testVerticalOffsetShiftsIslandFromItsAnchorOnLeftEdge() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+
+        let unshifted = frame(screen: screen, position: .center, edge: .left)
+        let shiftedUp = frame(screen: screen, position: .center, edge: .left, verticalOffset: 120)
+        XCTAssertEqual(islandCenterY(in: shiftedUp), islandCenterY(in: unshifted) + 120, accuracy: 0.001)
+
+        let shiftedDown = frame(screen: screen, position: .center, edge: .left, verticalOffset: -80)
+        XCTAssertEqual(islandCenterY(in: shiftedDown), islandCenterY(in: unshifted) - 80, accuracy: 0.001)
+
+        // The horizontal edge (now left) and container size are unaffected.
+        XCTAssertEqual(shiftedUp.minX, screen.minX, accuracy: 0.001)
         XCTAssertEqual(shiftedUp.size, unshifted.size)
     }
 
@@ -177,6 +245,26 @@ final class PanelFrameTests: XCTestCase {
                 verticalPosition: .center,
                 verticalOffset: offset
             )
+            XCTAssertEqual(strip.midY, docked.midY, accuracy: 0.001, "offset \(offset): strip must sit over the shifted island")
+        }
+    }
+
+    /// Same tracking, mirrored for `.left`.
+    func testHotZoneStripTracksVerticalOffsetOnLeftEdge() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let islandHeight = PanelLayoutMetrics.panelHeight(serviceCount: serviceCount)
+
+        for offset: CGFloat in [-300, 0, 150, 10_000, -10_000] {
+            let docked = frame(screen: screen, position: .center, edge: .left, verticalOffset: offset)
+            let strip = HotZoneGeometry.rect(
+                screenFrame: screen,
+                panelHeight: islandHeight,
+                width: 3,
+                edge: .left,
+                verticalPosition: .center,
+                verticalOffset: offset
+            )
+            XCTAssertEqual(strip.minX, docked.minX, accuracy: 0.001, "offset \(offset): strip and panel share the left edge")
             XCTAssertEqual(strip.midY, docked.midY, accuracy: 0.001, "offset \(offset): strip must sit over the shifted island")
         }
     }
@@ -319,6 +407,28 @@ final class PanelFrameTests: XCTestCase {
                 verticalPosition: position
             )
             XCTAssertEqual(strip.maxX, docked.maxX, accuracy: 0.001, "\(position): strip and panel share the edge")
+            XCTAssertEqual(strip.midY, docked.midY, accuracy: 0.001, "\(position): strip sits over the island")
+        }
+    }
+
+    /// Same agreement, mirrored for `.left` — the invisible hot-zone strip
+    /// must hug `screen.minX` exactly like the docked panel does, on a
+    /// second-display-style screen with a non-zero origin.
+    func testHotZoneStripSharesTheDockedEdgeAndVerticalBandOnLeftEdge() {
+        let screen = CGRect(x: 1440, y: 0, width: 2560, height: 1440)
+        let islandHeight = PanelLayoutMetrics.panelHeight(serviceCount: serviceCount)
+
+        for position in PanelVerticalPosition.allCases {
+            let docked = frame(screen: screen, position: position, edge: .left)
+            let strip = HotZoneGeometry.rect(
+                screenFrame: screen,
+                panelHeight: islandHeight,
+                width: 3,
+                edge: .left,
+                verticalPosition: position
+            )
+            XCTAssertEqual(strip.minX, docked.minX, accuracy: 0.001, "\(position): strip and panel share the edge")
+            XCTAssertEqual(strip.minX, screen.minX, accuracy: 0.001, "\(position): strip hugs the physical screen edge")
             XCTAssertEqual(strip.midY, docked.midY, accuracy: 0.001, "\(position): strip sits over the island")
         }
     }

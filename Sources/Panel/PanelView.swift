@@ -40,24 +40,63 @@ struct PanelView: View {
         UsageThresholds(warning: settings.warningThreshold, critical: settings.criticalThreshold)
     }
 
+    /// Which screen edge the panel currently docks to (ТЗ §6) — read live off
+    /// `AppSettings.shared` (already `@ObservedObject` above) so flipping the
+    /// Settings picker mirrors this whole view the moment the panel is next
+    /// shown, same as the threshold/percent-label settings already do.
+    private var edge: PanelEdge { settings.panelEdge }
+
+    /// The ZStack only ever measures as wide as its widest child (island
+    /// alone vs. island+card), so which edge it's pinned to is what makes
+    /// "window edge == screen edge" also mean "island is flush with the
+    /// screen edge" (ТЗ §3.2) — see the `.frame` comment below. `.right`
+    /// docks the island to the container's trailing edge (card grows
+    /// leading/left of it); `.left` mirrors that (island leading, card
+    /// grows trailing/right of it).
+    private var containerAlignment: Alignment { edge == .right ? .trailing : .leading }
+
+    /// Card offset from the island: negative (left) for a right-edge dock,
+    /// positive (right) for a left-edge dock — always on the side away from
+    /// the physical screen edge, where there's room to draw it.
+    private var cardOffsetX: CGFloat {
+        let magnitude = PanelLayoutMetrics.panelWidth + PanelLayoutMetrics.cardGap
+        return edge == .right ? -magnitude : magnitude
+    }
+
+    /// Card slide-transition distance — mirrors `cardOffsetX`'s sign so the
+    /// card slides in/out from further away on whichever side it actually
+    /// lives on.
+    private var cardTransitionOffsetX: CGFloat { edge == .right ? -30 : 30 }
+
+    /// Island drop-shadow horizontal offset (design-spec.md §3.1) — cast
+    /// away from the physical screen edge, same side the card lives on.
+    private var islandShadowOffsetX: CGFloat { edge == .right ? -6 : 6 }
+
+    /// Which side of the island gets rounded corners (design-spec.md §3.1):
+    /// always the side facing *into* the visible screen — the side flush
+    /// against the physical edge stays square, matching a shape that visibly
+    /// continues off-screen.
+    private var islandRoundedSide: HorizontalEdge { edge == .right ? .leading : .trailing }
+
     var body: some View {
-        ZStack(alignment: .trailing) {
+        ZStack(alignment: containerAlignment) {
             if let hoveredServiceID = cardHover.displayedServiceID, let index = services.firstIndex(of: hoveredServiceID) {
                 DetailCardView(
                     serviceID: hoveredServiceID,
                     status: model.status(for: hoveredServiceID),
                     thresholds: thresholds,
+                    edge: edge,
                     onErrorAction: { model.requestManualRefresh() },
                     isRefreshing: model.refreshingServiceIDs.contains(hoveredServiceID),
                     cooldownUntil: model.cooldownUntil[hoveredServiceID]
                 )
                     .offset(
-                        x: -(PanelLayoutMetrics.panelWidth + PanelLayoutMetrics.cardGap),
+                        x: cardOffsetX,
                         y: PanelLayoutMetrics.ringCenterOffset(index: index, count: services.count)
                     )
                     .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .offset(x: -30)),
-                        removal: .opacity.combined(with: .offset(x: -30))
+                        insertion: .opacity.combined(with: .offset(x: cardTransitionOffsetX)),
+                        removal: .opacity.combined(with: .offset(x: cardTransitionOffsetX))
                     ))
                     .id(hoveredServiceID)
                     // Load-bearing for the bugfix: without this, the card
@@ -69,18 +108,19 @@ struct PanelView: View {
 
             island
         }
-        // `alignment: .trailing` is load-bearing, not cosmetic: the ZStack
-        // only ever measures as wide as its widest child (62pt island alone,
-        // 300pt once the card is present — `.offset` doesn't affect layout),
-        // so the default `.center` alignment floated the island ~168pt away
-        // from the container's trailing edge and, through it, from the screen
-        // edge the window is docked to. Pinning trailing is what makes
-        // "window right edge == screen.frame.maxX" also mean "island is flush
-        // with the screen edge" (ТЗ §3.2).
+        // `alignment: containerAlignment` is load-bearing, not cosmetic: the
+        // ZStack only ever measures as wide as its widest child (62pt island
+        // alone, 300pt once the card is present — `.offset` doesn't affect
+        // layout), so the default `.center` alignment floated the island
+        // ~168pt away from the container's pinned edge and, through it, from
+        // the screen edge the window is docked to. Pinning to the same edge
+        // as `PanelWindow`'s dock is what makes "window edge == screen edge"
+        // also mean "island is flush with the screen edge" (ТЗ §3.2), for
+        // either `PanelEdge`.
         .frame(
             width: PanelLayoutMetrics.containerWidth(),
             height: PanelLayoutMetrics.containerHeight(serviceCount: services.count),
-            alignment: .trailing
+            alignment: containerAlignment
         )
         // design-spec.md §6.3: card fade+slide, 150ms ease-out.
         .animation(.easeOut(duration: 0.15), value: cardHover.displayedServiceID)
@@ -108,12 +148,13 @@ struct PanelView: View {
         .padding(.vertical, PanelLayoutMetrics.panelVerticalPadding)
         .frame(width: PanelLayoutMetrics.panelWidth)
         .background(
-            LeftRoundedRectangle(radius: PanelLayoutMetrics.panelCornerRadius)
+            EdgeRoundedRectangle(radius: PanelLayoutMetrics.panelCornerRadius, roundedSide: islandRoundedSide)
                 .fill(ManaColor.panelBackground)
         )
         // design-spec.md §3.1: box-shadow, tuned down from the design
-        // spec's dark-background value — see ColorPalette.swift.
-        .shadow(color: ManaColor.panelShadow, radius: 14, x: -6, y: 0)
+        // spec's dark-background value — see ColorPalette.swift. Mirrored
+        // per-edge via `islandShadowOffsetX` (ТЗ §6).
+        .shadow(color: ManaColor.panelShadow, radius: 14, x: islandShadowOffsetX, y: 0)
         // ТЗ §6: drag the island vertically to reposition the panel
         // (Grammarly-style), same free offset the Settings slider controls.
         // `minimumDistance: 0` so every micro-movement from mouse-down
@@ -132,13 +173,34 @@ struct PanelView: View {
     }
 }
 
-/// Rectangle rounded on its left (leading) corners only, right corners
-/// square (design-spec.md §3.1: `border-radius: 22px 0 0 22px`). Stand-in
-/// for `UnevenRoundedRectangle` (macOS 14+) since Mana targets 13.0.
-private struct LeftRoundedRectangle: Shape {
+/// Rectangle rounded on one horizontal side only, the other side square
+/// (design-spec.md §3.1: `border-radius: 22px 0 0 22px`, mirrored for the
+/// left-edge dock). Stand-in for `UnevenRoundedRectangle` (macOS 14+) since
+/// Mana targets 13.0.
+///
+/// `roundedSide` is always the side facing *into* the visible screen — the
+/// side flush against the physical screen edge stays square, as if the
+/// island's shape continues off past the edge (ТЗ §6: mirrored for `.left`).
+private struct EdgeRoundedRectangle: Shape {
     var radius: CGFloat
+    var roundedSide: HorizontalEdge
 
     func path(in rect: CGRect) -> Path {
+        let leftRounded = leftRoundedPath(in: rect)
+        switch roundedSide {
+        case .leading:
+            return leftRounded
+        case .trailing:
+            // Mirrors the leading-rounded path across the rect's vertical
+            // center line (x -> rect.minX + rect.maxX - x, y unchanged) —
+            // avoids hand-deriving separate arc angles for the mirrored
+            // corners, which is easy to get subtly wrong.
+            let transform = CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: rect.minX + rect.maxX, ty: 0)
+            return leftRounded.applying(transform)
+        }
+    }
+
+    private func leftRoundedPath(in rect: CGRect) -> Path {
         var path = Path()
         let r = min(radius, min(rect.width, rect.height) / 2)
         path.move(to: CGPoint(x: rect.maxX, y: rect.minY))

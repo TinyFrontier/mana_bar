@@ -81,12 +81,14 @@ final class PanelWindow: NSPanel {
 
     // MARK: - Frame math
 
-    /// Screen edge the window docks to. TODO: honor `AppSettings.panelEdge`
-    /// for a real left edge — see `SettingsView`, disabled there as "coming
-    /// soon". `PanelView` pins the island to the container's *trailing* edge,
-    /// so docking stays right-only until that view learns to flip, and that
-    /// control's disabled state stays honest.
-    private var dockEdge: PanelEdge { .right }
+    /// Screen edge the window docks to (ТЗ §6) — read live off
+    /// `AppSettings.shared.panelEdge` (same pattern as `AppSettings
+    /// .verticalPosition`/`.verticalOffset` below) so a Settings change picks
+    /// up the instant `reposition(on:)` next runs. `PanelView` mirrors its
+    /// own layout (island alignment, card offset, rounded corners) off the
+    /// same setting, so the visible window frame and its SwiftUI content
+    /// always agree on which side the island lives on.
+    private var dockEdge: PanelEdge { AppSettings.shared.panelEdge }
 
     private func hiddenFrame(on screen: NSScreen) -> NSRect {
         PanelLayoutMetrics.offscreenFrame(

@@ -28,6 +28,12 @@ struct DetailCardView: View {
     /// Ring/bar color thresholds (ТЗ §3.3, §6), same value `RingView` uses —
     /// threaded in by `PanelView` from `AppSettings`.
     var thresholds: UsageThresholds = .default
+    /// Which screen edge the panel docks to (ТЗ §6) — threaded in by
+    /// `PanelView` so the card's arrow points back at the island regardless
+    /// of which side that island actually lives on. Defaults to `.right`
+    /// (the original/only behavior) so every existing call site — including
+    /// the `#Preview` below — keeps compiling unchanged.
+    var edge: PanelEdge = .right
     /// Error-state action button (ТЗ §4.3): triggers the same interactive
     /// manual refresh as the status-bar "Refresh Now" menu item, for both the
     /// `.keychainAccessDenied` "Grant access" button and every other error's
@@ -84,11 +90,18 @@ struct DetailCardView: View {
         .frame(width: cardWidth, alignment: .leading)
         .background(ManaColor.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(alignment: .trailing) {
+        .overlay(alignment: edge == .right ? .trailing : .leading) {
+            // `CardArrow` is drawn pointing right (toward an island on the
+            // card's trailing side); for a left-edge dock the island sits on
+            // the card's *leading* side instead, so the shape is mirrored in
+            // place (flip around its own center) rather than redrawn, and
+            // pinned to the card's leading edge with the offset sign flipped
+            // to match (ТЗ §6).
             CardArrow()
                 .fill(ManaColor.cardBackground)
                 .frame(width: 14, height: 30)
-                .offset(x: 12)
+                .scaleEffect(x: edge == .right ? 1 : -1, y: 1)
+                .offset(x: edge == .right ? 12 : -12)
         }
         // design-spec.md §3.6, tuned down from the spec's dark-background
         // value — see ColorPalette.swift.
@@ -301,7 +314,10 @@ struct DetailCardView: View {
 }
 
 /// design-spec.md §3.6: 14×30 quadratic-bezier pointer, positioned at the
-/// card's trailing edge, vertically centered on the hovered ring.
+/// card's trailing edge, vertically centered on the hovered ring. Points
+/// right by construction (toward a `.right`-edge dock's island); the
+/// `DetailCardView` overlay mirrors it with `.scaleEffect(x: -1)` for a
+/// `.left`-edge dock rather than duplicating the path.
 private struct CardArrow: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -339,6 +355,8 @@ private struct CardArrow: Shape {
         )
         DetailCardView(serviceID: .chatgpt, status: .unavailable(.notLoggedIn))
         DetailCardView(serviceID: .claude, status: .unavailable(.connectionFailed))
+        // Left-edge dock: arrow mirrored onto the leading side (ТЗ §6).
+        DetailCardView(serviceID: .claude, status: .ready(.placeholder), edge: .left)
     }
     .padding(40)
     .background(Color.gray)
