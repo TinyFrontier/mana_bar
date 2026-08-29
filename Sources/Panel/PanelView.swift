@@ -103,8 +103,24 @@ struct PanelView: View {
             LeftRoundedRectangle(radius: PanelLayoutMetrics.panelCornerRadius)
                 .fill(ManaColor.panelBackground)
         )
-        // design-spec.md §3.1: box-shadow -18px 0 48px rgba(0,0,0,0.45).
-        .shadow(color: ManaColor.panelShadow, radius: 24, x: -10, y: 0)
+        // design-spec.md §3.1: box-shadow, tuned down from the design
+        // spec's dark-background value — see ColorPalette.swift.
+        .shadow(color: ManaColor.panelShadow, radius: 14, x: -6, y: 0)
+        // ТЗ §6: drag the island vertically to reposition the panel
+        // (Grammarly-style), same free offset the Settings slider controls.
+        // `minimumDistance: 0` so every micro-movement from mouse-down
+        // reaches `PanelWindow` (via `PanelModel.onDragChanged`) — the
+        // window itself decides, in `PanelDragGesture`, whether enough
+        // *vertical* distance has accumulated to actually start moving;
+        // below that threshold this is a no-op and hovering a ring / a
+        // detail-card button click behave exactly as before. Scoped to the
+        // island only (not the whole ZStack), so the detail card's own
+        // buttons are never in this gesture's hit-test region.
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in model.onDragChanged?() }
+                .onEnded { _ in model.onDragEnded?() }
+        )
     }
 }
 

@@ -25,6 +25,17 @@ final class PanelModel: ObservableObject {
     /// button is a harmless no-op.
     var onManualRefreshRequested: (() -> Void)?
 
+    /// Vertical island drag (ТЗ §6, "как у Grammarly"): fired by `PanelView`
+    /// island's `DragGesture(minimumDistance: 0)` on every change/end. Set by
+    /// `PanelWindow` in its own init to its own `handleDragChanged`/
+    /// `handleDragEnded` — same pass-through pattern as
+    /// `onManualRefreshRequested`, `PanelModel` has no drag logic of its own.
+    /// `minimumDistance: 0` means these fire even for a plain click with
+    /// near-zero movement; the actual "did this cross the drag threshold"
+    /// decision lives in `PanelDragGesture`, not here.
+    var onDragChanged: (() -> Void)?
+    var onDragEnded: (() -> Void)?
+
     init(serviceOrder: [ServiceID], statuses: [ServiceID: ServiceStatus]) {
         self.serviceOrder = serviceOrder
         self.statuses = statuses

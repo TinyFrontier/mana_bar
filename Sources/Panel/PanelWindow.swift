@@ -51,7 +51,13 @@ final class PanelWindow: NSPanel {
         isMovable = false
         isReleasedWhenClosed = false
 
-        contentView = NSHostingView(rootView: PanelView(model: model))
+        contentView = FirstMouseHostingView(rootView: PanelView(model: model))
+
+        // Drag-to-reposition (ТЗ §6, Grammarly-style): `PanelView`'s island
+        // calls these through `PanelModel` on every DragGesture
+        // change/end — see `handleDragChanged`/`handleDragEnded` below.
+        model.onDragChanged = { [weak self] in self?.handleDragChanged() }
+        model.onDragEnded = { [weak self] in self?.handleDragEnded() }
 
         if let screen = NSScreen.main {
             reposition(on: screen)
@@ -176,4 +182,144 @@ final class PanelWindow: NSPanel {
     var hitTestFrame: CGRect? {
         isShown ? frame : nil
     }
+
+    // MARK: - Drag-to-reposition (ТЗ §6, Grammarly-style island drag)
+
+    /// Window frame's origin Y captured at the start of the current drag
+    /// gesture (nil when no drag is in progress) — `updateDrag`/`endDrag`
+    /// measure from this fixed reference rather than re-applying incremental
+    /// per-event deltas, so nothing drifts over a long drag.
+    private var dragStartFrameOriginY: CGFloat?
+    private var dragPhase: PanelDragPhase = .pending
+
+    /// Mouse **screen** Y (`NSEvent.mouseLocation`, AppKit's up-positive,
+    /// window-independent coordinates) captured at the start of the current
+    /// drag — the reference `handleDragChanged`/`handleDragEnded` measure
+    /// against to turn a live cursor position into a `deltaY` for
+    /// `updateDrag`/`endDrag`.
+    private var dragStartMouseY: CGFloat?
+
+    /// Wired to `PanelModel.onDragChanged` (set in `init` above), called by
+    /// `PanelView`'s `DragGesture(minimumDistance: 0)` on the island for
+    /// every change, including the very first one right after mouse-down.
+    ///
+    /// Deliberately reads `NSEvent.mouseLocation` (real screen coordinates,
+    /// same technique `HotZoneMonitor` already uses) instead of the
+    /// gesture's own `value.translation`: `translation` is measured in the
+    /// SwiftUI view's *local* coordinate space, and `updateDrag` moves this
+    /// very window — and the view along with it — mid-gesture, so a
+    /// translation-based delta would be computed against a reference frame
+    /// that's itself sliding out from under the cursor, producing runaway
+    /// feedback instead of a 1:1 follow. Screen coordinates have no such
+    /// problem: they don't move when this window does.
+    private func handleDragChanged() {
+        let mouseY = NSEvent.mouseLocation.y
+        if dragStartMouseY == nil {
+            dragStartMouseY = mouseY
+        }
+        guard let startMouseY = dragStartMouseY else { return }
+        updateDrag(deltaY: mouseY - startMouseY)
+    }
+
+    /// Wired to `PanelModel.onDragEnded`, called once when the gesture ends
+    /// (mouse-up) — see `handleDragChanged` for why this reads
+    /// `NSEvent.mouseLocation` rather than `value.translation`.
+    private func handleDragEnded() {
+        defer { dragStartMouseY = nil }
+        let mouseY = NSEvent.mouseLocation.y
+        let startMouseY = dragStartMouseY ?? mouseY
+        endDrag(deltaY: mouseY - startMouseY)
+    }
+
+    /// Moves the window live during a drag, no animation — the window
+    /// tracks the cursor directly, same as dragging an island in Grammarly.
+    /// `deltaY` is the gesture's cumulative vertical distance since it
+    /// began, in AppKit screen points (positive = up, matching
+    /// `frame.origin.y`'s own convention).
+    ///
+    /// Below `PanelDragGesture.verticalThreshold` this is a no-op — an
+    /// ordinary click or a hover-intent micro-movement never nudges the
+    /// window (`PanelDragGesture.phase` decides; once `.dragging` is
+    /// reached it's sticky for the rest of the gesture).
+    ///
+    /// Exposed (not `private`) so a test can drive the exact code path a
+    /// real drag uses — one or more `updateDrag(deltaY:)` calls (the first
+    /// one captures the drag's starting frame) followed by
+    /// `endDrag(deltaY:)` — without posting synthetic mouse events, which
+    /// this sandboxed environment has no permission to do.
+    func updateDrag(deltaY: CGFloat) {
+        if dragStartFrameOriginY == nil {
+            dragStartFrameOriginY = frame.origin.y
+            dragPhase = .pending
+        }
+        guard let startFrameY = dragStartFrameOriginY else { return }
+        dragPhase = PanelDragGesture.phase(afterVerticalDelta: deltaY, previousPhase: dragPhase)
+        guard dragPhase == .dragging else { return }
+        var newFrame = frame
+        newFrame.origin.y = startFrameY + deltaY
+        setFrame(newFrame, display: true)
+    }
+
+    /// Ends the drag begun by the first `updateDrag(deltaY:)` call,
+    /// recomputing `AppSettings.verticalOffset` from the window's final
+    /// position relative to the current `AppSettings.verticalPosition`
+    /// anchor (`PanelLayoutMetrics.verticalOffset(forDockedFrameOriginY:)`).
+    /// Assigning `AppSettings.verticalOffset` is exactly what the Settings
+    /// slider itself does — the existing `AppDelegate.observeSettings()`
+    /// subscription reacts the same way either path got there: it re-clamps
+    /// through `PanelLayoutMetrics` on the next `reposition(on:)` and pushes
+    /// the same value into `HotZoneMonitor.verticalOffset`, so the invisible
+    /// hot-zone strip ends the drag already tracking the island.
+    ///
+    /// No-op if the drag never crossed the threshold (a plain click) — nothing
+    /// is written to `AppSettings` and the frame is left exactly where
+    /// `updateDrag` last put it (i.e. untouched, since it was also a no-op).
+    ///
+    /// Rounds the recovered offset to the nearest whole point: `NSWindow
+    /// .setFrame` itself only ever places a window at integral point
+    /// coordinates (confirmed live — an odd-height screen, e.g. 1169pt, puts
+    /// `screenFrame.midY` at a half-point value that `dockedOriginY` folds
+    /// in and AppKit then silently rounds away when the frame is actually
+    /// set), so a fractional `.5` in the recovered offset reflects that
+    /// rounding, not anything the user actually dragged to — storing it
+    /// unrounded would just be carrying AppKit's own noise into a persisted
+    /// preference for no benefit (`AppSettings.verticalOffset` is already
+    /// displayed rounded to whole points in Settings).
+    func endDrag(deltaY: CGFloat) {
+        defer {
+            dragStartFrameOriginY = nil
+            dragPhase = .pending
+        }
+        guard dragPhase == .dragging,
+              let startFrameY = dragStartFrameOriginY,
+              let targetScreen = screen ?? NSScreen.main
+        else { return }
+        let finalOriginY = startFrameY + deltaY
+        let rawOffset = PanelLayoutMetrics.verticalOffset(
+            forDockedFrameOriginY: finalOriginY,
+            screenFrame: targetScreen.frame,
+            serviceCount: model.serviceOrder.count,
+            verticalPosition: AppSettings.shared.verticalPosition
+        )
+        AppSettings.shared.verticalOffset = rawOffset.rounded()
+    }
+}
+
+/// `NSHostingView` subclass that responds to the very first click, instead
+/// of AppKit's default "first click on an inactive window merely brings it
+/// forward, a second click is needed to actually reach the view" behavior.
+///
+/// `PanelWindow` is a `.nonactivatingPanel` that never becomes key and whose
+/// owning app is `.accessory` (essentially never the frontmost app), so
+/// *every* click on it would otherwise be exactly that "first click on an
+/// inactive window" case — `acceptsFirstMouse(for:)` is the per-view (not
+/// per-window) override that opts out, matching how the system's own
+/// floating/utility panels (e.g. the color or font panel) respond
+/// immediately without needing to be brought forward first. Load-bearing for
+/// both the detail card's "Grant access"/"Re-login" buttons and the new
+/// island drag gesture (`PanelWindow.updateDrag`/`.endDrag`) — both are
+/// mouse-down-driven, so without this override the very first interaction
+/// after the panel appears could silently do nothing.
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

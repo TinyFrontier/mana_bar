@@ -263,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .sink { [weak self] edge in
                 self?.hotZoneMonitor?.edge = edge
-                self?.repositionPanel()
+                self?.repositionPanelOnNextRunLoopTurn()
             }
             .store(in: &settingsSubscriptions)
 
@@ -271,7 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .sink { [weak self] verticalPosition in
                 self?.hotZoneMonitor?.verticalPosition = verticalPosition
-                self?.repositionPanel()
+                self?.repositionPanelOnNextRunLoopTurn()
             }
             .store(in: &settingsSubscriptions)
 
@@ -279,7 +279,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .sink { [weak self] offset in
                 self?.hotZoneMonitor?.verticalOffset = CGFloat(offset)
-                self?.repositionPanel()
+                self?.repositionPanelOnNextRunLoopTurn()
             }
             .store(in: &settingsSubscriptions)
 
@@ -297,6 +297,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func repositionPanel() {
         guard let panelWindow, let screen = currentScreen() else { return }
         panelWindow.reposition(on: screen)
+    }
+
+    /// Bugfix (live feedback: dragging the Settings "Vertical offset" slider
+    /// didn't visibly move the panel): `@Published`'s projected publisher
+    /// (`settings.$verticalOffset` etc.) fires from `willSet` — i.e.
+    /// *before* the property's own stored value has actually been updated —
+    /// so a `.sink` closure that reacts by calling `repositionPanel()`
+    /// synchronously was reading `AppSettings.shared.verticalOffset` (inside
+    /// `PanelWindow.shownFrame`/`.hiddenFrame`) one step stale, computing the
+    /// frame for whatever the offset *used to be*, not the value that just
+    /// got set. Every earlier `.sink` in this file sidesteps the same trap by
+    /// using the emitted parameter directly instead of re-reading
+    /// `AppSettings.shared`; `repositionPanel()` can't do that (it re-derives
+    /// the whole frame from several settings at once, not just the one that
+    /// changed), so instead this defers the actual reposition to the next
+    /// run-loop turn — by then `AppSettings.shared`'s stored value has
+    /// settled to the new one. The one-tick delay is imperceptible (well
+    /// under a frame at 60Hz) and keeps every setting driving
+    /// `repositionPanel()` correct without duplicating per-property state.
+    private func repositionPanelOnNextRunLoopTurn() {
+        DispatchQueue.main.async { [weak self] in
+            self?.repositionPanel()
+        }
     }
 
     // MARK: - Onboarding (ТЗ §7)

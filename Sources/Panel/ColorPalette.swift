@@ -32,8 +32,16 @@ enum ManaColor {
     static let reloginBackgroundHover = Color.white.opacity(0.82)
     static let reloginText = Color(red: 0x0b / 255, green: 0x0b / 255, blue: 0x0c / 255)
 
-    static let panelShadow = Color.black.opacity(0.45)
-    static let cardShadow = Color.black.opacity(0.45)
+    // design-spec.md §3.1/§3.6 specify these against the spec's own dark
+    // background; at 0.45 opacity + 24-30pt radius they read as a grimy
+    // smudge once the panel floats over an arbitrary light desktop
+    // background (live feedback: "непонятная тень на светлом фоне"). Toned
+    // down (paired with smaller `.shadow(radius:)` values at the two call
+    // sites, PanelView/DetailCardView) so the shadow stays a subtle
+    // "floating" cue on light backgrounds while still reading normally on
+    // dark ones.
+    static let panelShadow = Color.black.opacity(0.2)
+    static let cardShadow = Color.black.opacity(0.2)
 
     static let errorBadgeBackground = Color(red: 0xff / 255, green: 0xd6 / 255, blue: 0x0a / 255)
 }

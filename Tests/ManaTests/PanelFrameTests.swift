@@ -181,6 +181,89 @@ final class PanelFrameTests: XCTestCase {
         }
     }
 
+    // MARK: - Drag-to-reposition (ТЗ §6, Grammarly-style island drag):
+    // `PanelLayoutMetrics.verticalOffset(forDockedFrameOriginY:)`, the pure
+    // "window position after a drag → AppSettings.verticalOffset" math
+    // `PanelWindow.endDrag` uses.
+
+    /// Round-trips with `dockedOriginY` whenever the recovered offset
+    /// wouldn't itself be clamped — i.e. dragging the island to wherever
+    /// `dockedFrame(verticalOffset: X)` already puts it must recover exactly
+    /// `X` back out. Offsets here are kept well under `verticalEdgeMargin`
+    /// (24pt) in magnitude so the `.top`/`.bottom` anchors — which only have
+    /// that much unclamped headroom on their edge-facing side — aren't
+    /// themselves clamped by `dockedOriginY` first (that clamped case is
+    /// covered separately by `testVerticalOffsetForDockedFrameOriginYIsNotClampedItself`).
+    func testVerticalOffsetForDockedFrameOriginYRoundTripsWithDockedOriginY() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+
+        for position in PanelVerticalPosition.allCases {
+            for offset: CGFloat in [-20, -10, -1, 0, 1, 5, 20] {
+                let originY = PanelLayoutMetrics.dockedOriginY(
+                    screenFrame: screen,
+                    serviceCount: serviceCount,
+                    verticalPosition: position,
+                    verticalOffset: offset
+                )
+                let recovered = PanelLayoutMetrics.verticalOffset(
+                    forDockedFrameOriginY: originY,
+                    screenFrame: screen,
+                    serviceCount: serviceCount,
+                    verticalPosition: position
+                )
+                XCTAssertEqual(recovered, offset, accuracy: 0.001, "\(position) offset \(offset)")
+            }
+        }
+    }
+
+    /// Round trip also holds on a non-origin, negative-origin screen — same
+    /// "don't assume (0,0)" regression the rest of this file guards against.
+    func testVerticalOffsetForDockedFrameOriginYRoundTripsOnOffsetScreen() {
+        let screen = CGRect(x: -2560, y: -300, width: 2560, height: 1440)
+        let originY = PanelLayoutMetrics.dockedOriginY(
+            screenFrame: screen,
+            serviceCount: serviceCount,
+            verticalPosition: .top,
+            verticalOffset: -75
+        )
+        let recovered = PanelLayoutMetrics.verticalOffset(
+            forDockedFrameOriginY: originY,
+            screenFrame: screen,
+            serviceCount: serviceCount,
+            verticalPosition: .top
+        )
+        XCTAssertEqual(recovered, -75, accuracy: 0.001)
+    }
+
+    /// A drag released past where the island could physically reach (screen
+    /// edge) recovers a raw offset *beyond* what `dockedOriginY` would ever
+    /// produce unclamped — by design (no clamp lives in this function
+    /// itself); feeding that raw offset back through the normal
+    /// `AppSettings.verticalOffset` → `dockedFrame` path is what snaps the
+    /// visible island back on-screen, exactly like a slider value typed past
+    /// `AppSettings.verticalOffsetRange` already does.
+    func testVerticalOffsetForDockedFrameOriginYIsNotClampedItself() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        // A container origin far above the screen — further than the island
+        // could ever actually be dragged to and stay visible.
+        let wayOffscreenOriginY = screen.maxY + 5_000
+
+        let recovered = PanelLayoutMetrics.verticalOffset(
+            forDockedFrameOriginY: wayOffscreenOriginY,
+            screenFrame: screen,
+            serviceCount: serviceCount,
+            verticalPosition: .center
+        )
+        XCTAssertGreaterThan(recovered, 5_000, "the raw recovered offset must not be pre-clamped")
+
+        // Feeding it back through the normal (clamped) path snaps the
+        // island back to the top edge, same guarantee `testVerticalOffsetClampsAtScreenEdges` covers for the slider.
+        let islandHeight = PanelLayoutMetrics.panelHeight(serviceCount: serviceCount)
+        let maxIslandCenterY = screen.maxY - islandHeight / 2
+        let reclamped = frame(screen: screen, position: .center, verticalOffset: recovered)
+        XCTAssertEqual(islandCenterY(in: reclamped), maxIslandCenterY, accuracy: 0.001)
+    }
+
     // MARK: - Off-screen (slide origin/destination)
 
     func testOffscreenFrameSitsJustPastTheEdgeAtTheSameHeight() {

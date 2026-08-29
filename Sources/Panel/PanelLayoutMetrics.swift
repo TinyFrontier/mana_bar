@@ -167,6 +167,49 @@ enum PanelLayoutMetrics {
         )
     }
 
+    /// Inverse of `dockedOriginY`: given the container frame's *current*
+    /// origin Y (where a live vertical drag just left it — ТЗ §6, the
+    /// Grammarly-style island drag), recovers the raw `AppSettings
+    /// .verticalOffset` that reproduces that same island position relative
+    /// to `verticalPosition`'s anchor — the drag's "read the offset back
+    /// out" step on release. `PanelWindow.endDrag` feeds its result straight
+    /// into `AppSettings.verticalOffset`.
+    ///
+    /// Deliberately mirrors `dockedOriginY`'s *unclamped* anchor+offset
+    /// addition and applies no clamp of its own: a drag moves the window
+    /// 1:1 with the cursor, unclamped, exactly like the slider allows typing
+    /// past `AppSettings.verticalOffsetRange`; the very next reposition
+    /// (`AppSettings.$verticalOffset` → `PanelWindow.reposition` →
+    /// `dockedFrame` → `dockedOriginY`) re-enters the normal, clamped path
+    /// and snaps the visible island back onto the screen if the drag went
+    /// past its edge — same guarantee the slider already gets, no separate
+    /// clamp needed here.
+    ///
+    /// Round-trips with `dockedOriginY` whenever the offset it recovers
+    /// wouldn't itself be clamped: `dockedOriginY(verticalOffset:
+    /// verticalOffset(forDockedFrameOriginY: Y, ...), ...) == Y`.
+    static func verticalOffset(
+        forDockedFrameOriginY originY: CGFloat,
+        screenFrame: CGRect,
+        serviceCount: Int,
+        verticalPosition: PanelVerticalPosition,
+        margin: CGFloat = verticalEdgeMargin
+    ) -> CGFloat {
+        let containerHeight = containerHeight(serviceCount: serviceCount)
+        let islandHeight = panelHeight(serviceCount: serviceCount)
+        let desiredIslandCenterY = originY + containerHeight / 2
+        let anchorIslandCenterY: CGFloat
+        switch verticalPosition {
+        case .center:
+            anchorIslandCenterY = screenFrame.midY
+        case .top:
+            anchorIslandCenterY = screenFrame.maxY - margin - islandHeight / 2
+        case .bottom:
+            anchorIslandCenterY = screenFrame.minY + margin + islandHeight / 2
+        }
+        return desiredIslandCenterY - anchorIslandCenterY
+    }
+
     /// Off-screen frame the panel slides in from / out to: the whole
     /// container parked just past the chosen edge, same vertical placement as
     /// `dockedFrame`.

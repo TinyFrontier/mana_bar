@@ -63,7 +63,9 @@ struct DetailCardView: View {
                 .frame(width: 14, height: 30)
                 .offset(x: 12)
         }
-        .shadow(color: ManaColor.cardShadow, radius: 30, x: 0, y: 22)
+        // design-spec.md §3.6, tuned down from the spec's dark-background
+        // value — see ColorPalette.swift.
+        .shadow(color: ManaColor.cardShadow, radius: 16, x: 0, y: 12)
     }
 
     // MARK: Header (design-spec.md §3.7.1)
