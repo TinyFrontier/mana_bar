@@ -184,7 +184,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             providers: providers,
             // ТЗ §5: clean integration point — every successful fetch's
             // fresh snapshot is evaluated for threshold crossings.
-            onUsageUpdated: { usage in NotificationManager.shared.evaluate(usage) }
+            onUsageUpdated: { usage in NotificationManager.shared.evaluate(usage) },
+            // research doc §9 п.7: last-good snapshot per provider on disk,
+            // so a relaunch can show yesterday's numbers immediately instead
+            // of a blank `.loading` state.
+            snapshotCache: UsageSnapshotCache()
         )
     }
 

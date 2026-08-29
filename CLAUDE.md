@@ -86,5 +86,5 @@ xcodebuild -project Mana.xcodeproj -scheme Mana -configuration Debug test -desti
   UNUserNotificationCenter thresholds with per-window cooldown.
 
 Known TODOs: left screen edge (Settings control disabled), explicit
-monitor picker, real service logos (SF Symbol placeholders), deep
-multi-monitor/Spaces handling, .dmg packaging/signing/notarization.
+monitor picker, deep multi-monitor/Spaces handling, .dmg
+packaging/signing/notarization.

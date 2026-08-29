@@ -16,6 +16,25 @@ final class PanelModel: ObservableObject {
 
     @Published private(set) var statuses: [ServiceID: ServiceStatus]
 
+    /// Services `UsageCoordinator` currently has an in-flight fetch open for
+    /// on a trigger the UI should visibly react to: an interactive manual
+    /// refresh (Re-login/Retry/Grant-access button, ТЗ §4.3 live-feedback
+    /// fix — those buttons used to appear to do nothing), or the very first
+    /// re-verification of a disk-cache-seeded snapshot right after launch
+    /// (research doc §9 п.7). Deliberately NOT set for silent background
+    /// polls (timer/wake/force-refresh-on-show), which stay invisible by
+    /// design. `RingView`/`DetailCardView` read this via
+    /// `PanelView` to show a loading cue without discarding `statuses`' last
+    /// -good data — set/cleared exclusively by `UsageCoordinator`.
+    @Published private(set) var refreshingServiceIDs: Set<ServiceID> = []
+
+    /// Wall-clock deadline of an active `.rateLimited` cooldown, when known —
+    /// `UsageCoordinator` is the only writer (`recordFailure`/`recordSuccess`).
+    /// `DetailCardView`'s rate-limited copy uses this to show "через ~N мин"/
+    /// "в HH:MM" instead of a re-login button that would be misleading for a
+    /// rate limit (manual refresh doesn't bypass this cooldown either way).
+    @Published private(set) var cooldownUntil: [ServiceID: Date] = [:]
+
     /// Triggers an interactive manual refresh (ТЗ §4.2) — the same path the
     /// status-bar "Refresh Now" menu item uses. Set by `AppDelegate` to call
     /// `UsageCoordinator.refreshNow()`; `DetailCardView`'s error-state action
@@ -55,6 +74,22 @@ final class PanelModel: ObservableObject {
 
     func setStatus(_ status: ServiceStatus, for id: ServiceID) {
         statuses[id] = status
+    }
+
+    /// Marks/unmarks `id` as having a visible in-flight fetch (see
+    /// `refreshingServiceIDs` doc). Idempotent either way.
+    func setRefreshing(_ isRefreshing: Bool, for id: ServiceID) {
+        if isRefreshing {
+            refreshingServiceIDs.insert(id)
+        } else {
+            refreshingServiceIDs.remove(id)
+        }
+    }
+
+    /// Records (or clears, with `nil`) the active rate-limit cooldown
+    /// deadline for `id` (see `cooldownUntil` doc).
+    func setCooldownUntil(_ date: Date?, for id: ServiceID) {
+        cooldownUntil[id] = date
     }
 
     /// Applies a new enabled/ordered service list (ТЗ §6 "список сервисов:

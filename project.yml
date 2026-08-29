@@ -33,6 +33,11 @@ targets:
     type: application
     platform: macOS
     deploymentTarget: "13.0"
+    # Recursively includes everything under Sources/, which is also where
+    # Sources/Resources/Assets.xcassets (real Claude/OpenAI logos, ТЗ §3.3)
+    # lives — XcodeGen auto-detects `.xcassets` as a resource folder within
+    # any listed source path and wires it into the target's "Copy Bundle
+    # Resources" build phase, no separate `resources:` entry needed.
     sources:
       - path: Sources
     info:

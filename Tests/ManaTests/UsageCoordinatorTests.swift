@@ -77,6 +77,52 @@ final class TestClock: @unchecked Sendable {
     }
 }
 
+/// A provider whose `fetchUsage()` suspends until the test explicitly
+/// releases it via `resume(with:)` — unlike `FakeUsageProvider` (which
+/// resolves synchronously off a queue), this lets a test observe the
+/// coordinator's state *while* a fetch is genuinely in flight, e.g. the
+/// manual-refresh loading cue (ТЗ §4.3 live-feedback fix).
+final class GatedUsageProvider: UsageProvider, @unchecked Sendable {
+    let serviceID: ServiceID
+
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Result<ServiceUsage, UsageError>, Never>?
+    private var pendingResult: Result<ServiceUsage, UsageError>?
+
+    init(serviceID: ServiceID) {
+        self.serviceID = serviceID
+    }
+
+    func hasLocalCredentials() async -> Bool { true }
+
+    func fetchUsage() async throws -> ServiceUsage {
+        let result = await withCheckedContinuation { (continuation: CheckedContinuation<Result<ServiceUsage, UsageError>, Never>) in
+            lock.lock()
+            if let pendingResult {
+                lock.unlock()
+                continuation.resume(returning: pendingResult)
+                return
+            }
+            self.continuation = continuation
+            lock.unlock()
+        }
+        return try result.get()
+    }
+
+    /// Releases the pending (or, if called first, the next) `fetchUsage()`.
+    func resume(with result: Result<ServiceUsage, UsageError>) {
+        lock.lock()
+        if let continuation {
+            self.continuation = nil
+            lock.unlock()
+            continuation.resume(returning: result)
+        } else {
+            pendingResult = result
+            lock.unlock()
+        }
+    }
+}
+
 @MainActor
 final class UsageCoordinatorTests: XCTestCase {
     private func usage(_ id: ServiceID, refreshedAt: Date, percent: Double = 10) -> ServiceUsage {
@@ -95,7 +141,8 @@ final class UsageCoordinatorTests: XCTestCase {
         clock: TestClock,
         forceRefreshStaleness: TimeInterval = 60,
         fixedCooldown: TimeInterval = 60,
-        fetchTimeout: TimeInterval = 999_999
+        fetchTimeout: TimeInterval = 999_999,
+        snapshotCache: UsageSnapshotCache? = nil
     ) -> (UsageCoordinator, PanelModel) {
         let model = PanelModel(serviceOrder: [.claude, .chatgpt], statuses: [:])
         let providers: [ServiceID: UsageCoordinator.ProviderPair] = [
@@ -110,6 +157,7 @@ final class UsageCoordinatorTests: XCTestCase {
             fixedCooldown: fixedCooldown,
             observesWake: false,
             fetchTimeout: fetchTimeout,
+            snapshotCache: snapshotCache,
             now: clock.now
         )
         return (coordinator, model)
@@ -436,5 +484,208 @@ final class UsageCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(claude.fetchCount, 1)
         XCTAssertEqual(model.status(for: .claude).usage, usage(.claude, refreshedAt: clock.now()))
+    }
+
+    // MARK: - Manual refresh visible loading feedback (ТЗ §4.3 live-feedback fix)
+
+    /// Waits (via cooperative yielding, not a real sleep — deterministic and
+    /// fast) until `predicate()` is true or the budget runs out.
+    private func waitUntil(_ predicate: () -> Bool, iterations: Int = 10_000) async {
+        for _ in 0..<iterations {
+            if predicate() { return }
+            await Task.yield()
+        }
+    }
+
+    func testManualRefreshOfServiceWithNoDataShowsLoadingWhileInFlight() async {
+        let clock = TestClock()
+        let claude = GatedUsageProvider(serviceID: .claude)
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.success(usage(.chatgpt, refreshedAt: clock.now()))])
+        let model = PanelModel(serviceOrder: [.claude, .chatgpt], statuses: [:])
+        let coordinator = UsageCoordinator(
+            model: model,
+            providers: [
+                .claude: UsageCoordinator.ProviderPair(claude),
+                .chatgpt: UsageCoordinator.ProviderPair(chatgpt),
+            ],
+            pollInterval: 999_999,
+            observesWake: false,
+            fetchTimeout: 999_999,
+            now: clock.now
+        )
+        model.setStatus(.unavailable(.notLoggedIn), for: .claude)
+
+        let refreshTask = Task { await coordinator.refreshNow() }
+        await waitUntil { model.refreshingServiceIDs.contains(.claude) }
+
+        XCTAssertEqual(model.status(for: .claude), .loading, "a service with no data must flip to .loading for the duration of a manual refresh")
+        XCTAssertTrue(model.refreshingServiceIDs.contains(.claude))
+
+        let freshUsage = usage(.claude, refreshedAt: clock.now(), percent: 5)
+        claude.resume(with: .success(freshUsage))
+        await refreshTask.value
+
+        XCTAssertEqual(model.status(for: .claude), .ready(freshUsage))
+        XCTAssertFalse(model.refreshingServiceIDs.contains(.claude), "the loading cue must clear once the fetch resolves")
+    }
+
+    /// The other half of the same fix: a `.stale` service (last-good data +
+    /// an error) must keep showing that data throughout a manual refresh —
+    /// only `refreshingServiceIDs` should change, never `statuses`.
+    func testManualRefreshOfStaleServiceKeepsDataVisibleWhileInFlight() async {
+        let clock = TestClock()
+        let goodUsage = usage(.claude, refreshedAt: clock.now(), percent: 55)
+        let claude = GatedUsageProvider(serviceID: .claude)
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.success(usage(.chatgpt, refreshedAt: clock.now()))])
+        let model = PanelModel(serviceOrder: [.claude, .chatgpt], statuses: [:])
+        let coordinator = UsageCoordinator(
+            model: model,
+            providers: [
+                .claude: UsageCoordinator.ProviderPair(claude),
+                .chatgpt: UsageCoordinator.ProviderPair(chatgpt),
+            ],
+            pollInterval: 999_999,
+            observesWake: false,
+            fetchTimeout: 999_999,
+            now: clock.now
+        )
+        model.setStatus(.stale(goodUsage, .connectionFailed), for: .claude)
+
+        let refreshTask = Task { await coordinator.refreshNow() }
+        await waitUntil { model.refreshingServiceIDs.contains(.claude) }
+
+        XCTAssertEqual(model.status(for: .claude), .stale(goodUsage, .connectionFailed), "manual refresh must never blank out last-good data while in flight")
+
+        let freshUsage = usage(.claude, refreshedAt: clock.now(), percent: 12)
+        claude.resume(with: .success(freshUsage))
+        await refreshTask.value
+
+        XCTAssertEqual(model.status(for: .claude), .ready(freshUsage))
+        XCTAssertFalse(model.refreshingServiceIDs.contains(.claude))
+    }
+
+    // MARK: - Rate-limit cooldown deadline surfaced to the UI (ТЗ §4.3 live-feedback fix)
+
+    func testRateLimitedFailureRecordsCooldownDeadlineInModel() async {
+        let clock = TestClock()
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [.failure(.rateLimited(retryAfter: 90))])
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.failure(.connectionFailed)])
+        let (coordinator, model) = makeCoordinator(claude: claude, chatgpt: chatgpt, clock: clock, fixedCooldown: 60)
+
+        await coordinator.handleTimerTick()
+
+        XCTAssertEqual(model.cooldownUntil[.claude], clock.now().addingTimeInterval(90))
+    }
+
+    func testNonRateLimitFailureDoesNotRecordACooldownDeadline() async {
+        let clock = TestClock()
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [.failure(.connectionFailed)])
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.failure(.connectionFailed)])
+        let (coordinator, model) = makeCoordinator(claude: claude, chatgpt: chatgpt, clock: clock, fixedCooldown: 60)
+
+        await coordinator.handleTimerTick()
+
+        XCTAssertNil(model.cooldownUntil[.claude], "only .rateLimited should surface a retry deadline — the plain cooldown is timer hygiene, not user-facing")
+    }
+
+    func testSuccessClearsAnyPreviousRateLimitCooldownDeadline() async {
+        let clock = TestClock()
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [.failure(.rateLimited(retryAfter: 120))])
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.failure(.connectionFailed)])
+        let (coordinator, model) = makeCoordinator(claude: claude, chatgpt: chatgpt, clock: clock, fixedCooldown: 60)
+
+        await coordinator.handleTimerTick()
+        XCTAssertNotNil(model.cooldownUntil[.claude])
+
+        clock.advance(by: 121)
+        claude.enqueue(.success(usage(.claude, refreshedAt: clock.now())))
+        await coordinator.handleTimerTick()
+
+        XCTAssertNil(model.cooldownUntil[.claude])
+    }
+
+    // MARK: - Disk cache seeding on launch (research doc §9 п.7)
+
+    func testSeedFromDiskCacheShowsCachedDataMarkedRefreshingWithoutFetching() {
+        let clock = TestClock()
+        let tempDir = TemporaryDirectory(self)
+        let cache = UsageSnapshotCache(directory: URL(fileURLWithPath: tempDir.path))
+        let cachedUsage = usage(.claude, refreshedAt: clock.now().addingTimeInterval(-6 * 3600), percent: 61)
+        cache.save(cachedUsage)
+
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [])
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [])
+        let (coordinator, model) = makeCoordinator(claude: claude, chatgpt: chatgpt, clock: clock, snapshotCache: cache)
+
+        coordinator.seedFromDiskCache()
+
+        XCTAssertEqual(model.status(for: .claude), .ready(cachedUsage))
+        XCTAssertTrue(model.refreshingServiceIDs.contains(.claude))
+        XCTAssertEqual(claude.fetchCount, 0, "seeding from the disk cache must never touch the network")
+        // ChatGPT has no cached entry: untouched, still the plain launch default.
+        XCTAssertEqual(model.status(for: .chatgpt), .loading)
+    }
+
+    func testSeedFromDiskCacheNeverOverwritesDataAlreadyInModel() {
+        let clock = TestClock()
+        let tempDir = TemporaryDirectory(self)
+        let cache = UsageSnapshotCache(directory: URL(fileURLWithPath: tempDir.path))
+        cache.save(usage(.claude, refreshedAt: clock.now().addingTimeInterval(-3600), percent: 20))
+
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [])
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [])
+        let (coordinator, model) = makeCoordinator(claude: claude, chatgpt: chatgpt, clock: clock, snapshotCache: cache)
+        let alreadyThere = usage(.claude, refreshedAt: clock.now(), percent: 99)
+        model.setStatus(.ready(alreadyThere), for: .claude)
+
+        coordinator.seedFromDiskCache()
+
+        XCTAssertEqual(model.status(for: .claude), .ready(alreadyThere))
+        XCTAssertFalse(model.refreshingServiceIDs.contains(.claude))
+    }
+
+    /// The end-to-end shape of ТЗ's live-run check: the coordinator starts
+    /// with a disk-cached snapshot and, once the immediate launch fetch
+    /// resolves, replaces it with fresh data — which is in turn written back
+    /// to the cache for the *next* launch (research doc §9 п.7: "свежесть
+    /// только внутри текущей сессии запуска").
+    func testPerformLaunchPollReplacesCachedSnapshotWithFreshDataAndUpdatesTheCache() async {
+        let clock = TestClock()
+        let tempDir = TemporaryDirectory(self)
+        let cache = UsageSnapshotCache(directory: URL(fileURLWithPath: tempDir.path))
+        let cachedUsage = usage(.claude, refreshedAt: clock.now().addingTimeInterval(-6 * 3600), percent: 61)
+        cache.save(cachedUsage)
+
+        let freshUsage = usage(.claude, refreshedAt: clock.now(), percent: 9)
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [.success(freshUsage)])
+        let chatgptUsage = usage(.chatgpt, refreshedAt: clock.now())
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.success(chatgptUsage)])
+        let (coordinator, model) = makeCoordinator(claude: claude, chatgpt: chatgpt, clock: clock, snapshotCache: cache)
+
+        await coordinator.performLaunchPoll()
+
+        XCTAssertEqual(model.status(for: .claude), .ready(freshUsage))
+        XCTAssertFalse(model.refreshingServiceIDs.contains(.claude))
+        XCTAssertEqual(claude.fetchCount, 1, "a cached snapshot must always be re-verified by one fetch right after launch, never trusted on its own")
+        XCTAssertEqual(cache.load()[.claude], freshUsage, "a fresh success must overwrite the disk cache with the new last-good snapshot")
+    }
+
+    /// A failed launch re-check must still clear the "being re-verified" cue
+    /// even though it downgrades to `.stale` rather than `.ready`.
+    func testPerformLaunchPollOnFailureStillClearsRefreshingAndKeepsCachedDataAsStale() async {
+        let clock = TestClock()
+        let tempDir = TemporaryDirectory(self)
+        let cache = UsageSnapshotCache(directory: URL(fileURLWithPath: tempDir.path))
+        let cachedUsage = usage(.claude, refreshedAt: clock.now().addingTimeInterval(-6 * 3600), percent: 61)
+        cache.save(cachedUsage)
+
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [.failure(.connectionFailed)])
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.failure(.connectionFailed)])
+        let (coordinator, model) = makeCoordinator(claude: claude, chatgpt: chatgpt, clock: clock, snapshotCache: cache)
+
+        await coordinator.performLaunchPoll()
+
+        XCTAssertEqual(model.status(for: .claude), .stale(cachedUsage, .connectionFailed))
+        XCTAssertFalse(model.refreshingServiceIDs.contains(.claude))
     }
 }

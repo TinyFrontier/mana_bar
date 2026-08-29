@@ -47,7 +47,9 @@ struct PanelView: View {
                     serviceID: hoveredServiceID,
                     status: model.status(for: hoveredServiceID),
                     thresholds: thresholds,
-                    onErrorAction: { model.requestManualRefresh() }
+                    onErrorAction: { model.requestManualRefresh() },
+                    isRefreshing: model.refreshingServiceIDs.contains(hoveredServiceID),
+                    cooldownUntil: model.cooldownUntil[hoveredServiceID]
                 )
                     .offset(
                         x: -(PanelLayoutMetrics.panelWidth + PanelLayoutMetrics.cardGap),
@@ -87,7 +89,13 @@ struct PanelView: View {
     private var island: some View {
         VStack(spacing: PanelLayoutMetrics.ringGap) {
             ForEach(services) { serviceID in
-                RingView(serviceID: serviceID, status: model.status(for: serviceID), thresholds: thresholds, showPercent: settings.showPercentUnderRings)
+                RingView(
+                    serviceID: serviceID,
+                    status: model.status(for: serviceID),
+                    thresholds: thresholds,
+                    showPercent: settings.showPercentUnderRings,
+                    isRefreshing: model.refreshingServiceIDs.contains(serviceID)
+                )
                     .onHover { isHovering in
                         if isHovering {
                             cardHover.ringEntered(serviceID)

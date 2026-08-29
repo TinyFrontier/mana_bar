@@ -88,6 +88,33 @@ enum ResetFormatter {
     }
 }
 
+extension ResetFormatter {
+    /// "через ~N мин" (deadline within the next hour) / "в HH:MM" (further
+    /// out) for the `.rateLimited` detail-card copy (ТЗ §4.3 live-feedback
+    /// fix: the previous "Re-login via CLI" button was meaningless for a
+    /// rate limit — a manual refresh can't bypass this cooldown either, see
+    /// `UsageCoordinator.eligible`). `nil` when the coordinator hasn't
+    /// recorded a deadline yet, or it has already passed (the next poll is
+    /// about to clear it).
+    static func rateLimitRetryHint(cooldownUntil: Date?, now: Date = Date()) -> String? {
+        guard let cooldownUntil else { return nil }
+        let seconds = cooldownUntil.timeIntervalSince(now)
+        guard seconds > 0 else { return nil }
+
+        let minutes = Int((seconds / 60).rounded(.up))
+        if minutes <= 60 {
+            return "через ~\(max(1, minutes)) мин"
+        }
+
+        let formatter = DateFormatter()
+        formatter.calendar = .enUSPOSIX
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "HH:mm"
+        return "в \(formatter.string(from: cooldownUntil))"
+    }
+}
+
 extension Calendar {
     /// Gregorian calendar with the locale pinned to en_US_POSIX (so weekday/
     /// month names and AM/PM always render in English) and the system's

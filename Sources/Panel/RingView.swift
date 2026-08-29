@@ -17,6 +17,13 @@ struct RingView: View {
     /// ТЗ §6 "показывать проценты под кольцами" — when `false`, the percent
     /// label under the ring is omitted entirely (not just dimmed).
     var showPercent: Bool = true
+    /// `PanelModel.refreshingServiceIDs.contains(serviceID)`, threaded in by
+    /// `PanelView` — plays the same spinning-arc cue as `.loading`, layered
+    /// on top of whatever the ring is already showing (including a `.stale`
+    /// ring's last-good percent/color), so a manual refresh or the launch-
+    /// time re-check of a disk-cache-seeded snapshot is visibly happening
+    /// without ever hiding data (ТЗ §4.3 live-feedback fix).
+    var isRefreshing: Bool = false
 
     /// design-spec.md §3.2: SVG viewBox 0 0 38 38, ring r=16.6.
     private let frameSize: CGFloat = 38
@@ -83,9 +90,13 @@ struct RingView: View {
                     .animation(.easeInOut(duration: 0.32), value: fraction)
                     .animation(.easeInOut(duration: 0.2), value: ringColor)
 
-                if isLoading {
+                if isLoading || isRefreshing {
                     // design-spec.md §6.5: dasharray "24 81" ≈ 22.9% of the
                     // circumference visible, spinning 360° every 0.9s linear.
+                    // Also played (unlike the dash-offset collapse above,
+                    // which stays gated on `isError`/`isLoading` only) while
+                    // `isRefreshing` — over a `.stale` ring's real percent/
+                    // color, not just the plain `.loading` gray one.
                     Circle()
                         .trim(from: 0, to: 24.0 / (24.0 + 81.0))
                         .stroke(ManaColor.spinnerStroke, style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round))
@@ -96,10 +107,8 @@ struct RingView: View {
                 }
 
                 // design-spec.md §3.3: 17×17 glyph container, scale 0.62.
-                Image(systemName: serviceID.glyphSystemName)
-                    .font(.system(size: 17 * 0.62, weight: .semibold))
+                ServiceLogo(serviceID: serviceID, size: 17)
                     .foregroundStyle(glyphColor)
-                    .frame(width: 17, height: 17)
             }
             .frame(width: frameSize, height: frameSize)
             .overlay(alignment: .bottomTrailing) {
@@ -144,6 +153,7 @@ private struct ErrorBadge: View {
         RingView(serviceID: .claude, status: .ready(.placeholder))
         RingView(serviceID: .claude, status: .loading)
         RingView(serviceID: .claude, status: .unavailable(.connectionFailed))
+        RingView(serviceID: .chatgpt, status: .stale(.placeholder, .connectionFailed), isRefreshing: true)
     }
     .padding()
     .background(Color.black)

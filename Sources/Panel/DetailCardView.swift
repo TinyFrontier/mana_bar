@@ -3,11 +3,25 @@ import SwiftUI
 /// Flyout detail card shown to the left of the panel island when a ring is
 /// hovered (ТЗ §3.4; design-spec.md §3.6–§3.7): service name/logo, a
 /// "Current session" row (relative reset time) and an "All models" row
-/// (absolute reset time), each with a 5px progress bar. On `stale`/
-/// `unavailable` status the progress rows are replaced by
-/// `error.userDescription` plus a "Re-login via CLI" stub button
-/// (design-spec.md §3.7.4, ТЗ §4.3). Fade+slide entrance/exit animation is
-/// owned by the parent `PanelView`, which controls this view's presence.
+/// (absolute reset time), each with a 5px progress bar.
+///
+/// Error handling is per-case (ТЗ §4.3 live-feedback fix — the old one-size-
+/// -fits-all "Re-login via CLI" button was actively wrong for a rate limit,
+/// where a manual refresh can't do anything until the cooldown elapses):
+/// - `.stale` (last-good data + an error): the progress rows stay visible,
+///   with a compact one-line warning underneath — never the full error
+///   block, so a transient failure never makes numbers disappear.
+/// - `.unavailable(.rateLimited)`: explanatory text plus, when the
+///   coordinator's cooldown deadline is known, "через ~N мин"/"в HH:MM" —
+///   deliberately NO button (see `errorSection`).
+/// - `.unavailable(.keychainAccessDenied)`: "Grant access" button.
+/// - `.unavailable(.notLoggedIn / .sessionExpired / .missingScope)`: a CLI
+///   login hint plus "Re-login via CLI".
+/// - `.unavailable(.connectionFailed / .requestFailed / .decodingFailed)`:
+///   "Retry" button.
+///
+/// Fade+slide entrance/exit animation is owned by the parent `PanelView`,
+/// which controls this view's presence.
 struct DetailCardView: View {
     let serviceID: ServiceID
     let status: ServiceStatus
@@ -22,35 +36,48 @@ struct DetailCardView: View {
     /// Defaults to a no-op for Previews and other contexts with nothing to
     /// wire it to.
     var onErrorAction: () -> Void = {}
+    /// `PanelModel.refreshingServiceIDs.contains(serviceID)`, threaded in by
+    /// `PanelView` — shows a small in-progress cue (header spinner) for the
+    /// duration of a manual refresh or the launch-time re-check of a
+    /// disk-cache-seeded snapshot, without hiding whatever data is already
+    /// on screen (ТЗ §4.3 live-feedback fix).
+    var isRefreshing: Bool = false
+    /// `PanelModel.cooldownUntil[serviceID]`, threaded in by `PanelView` —
+    /// only meaningful for `.rateLimited`, see `errorSection`.
+    var cooldownUntil: Date? = nil
 
     private let cardWidth: CGFloat = 300
-
-    private var isLoadingState: Bool {
-        if case .loading = status { return true }
-        return false
-    }
 
     private var isErrorState: Bool { status.error != nil }
 
     private var usage: ServiceUsage? { status.usage }
 
-    private var modelWeeklyWindows: [UsageWindow] {
-        usage?.windows.filter {
+    private func modelWeeklyWindows(in usage: ServiceUsage) -> [UsageWindow] {
+        usage.windows.filter {
             if case .modelWeekly = $0.kind { return true }
             return false
-        } ?? []
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
-            if isErrorState {
+            if let usage {
+                // `.ready` (no error) and `.stale` (has last-good data, plus
+                // an error) both land here: the fix for the bug where `.stale`
+                // used to hit `errorSection` and hide the numbers entirely.
+                // `.stale` gets the same progress rows PLUS a compact warning
+                // line — never the full button/hint block, which is only for
+                // "no data at all" (ТЗ §4.3).
+                dataSection(usage: usage)
+                if let error = status.error {
+                    staleWarningRow(error)
+                }
+            } else if isErrorState {
                 errorSection
-            } else if isLoadingState {
-                loadingSection
             } else {
-                dataSection
+                loadingSection
             }
         }
         .padding(EdgeInsets(top: 16, leading: 18, bottom: 18, trailing: 18))
@@ -72,31 +99,39 @@ struct DetailCardView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: serviceID.glyphSystemName)
-                .font(.system(size: 17 * 0.8, weight: .semibold))
+            ServiceLogo(serviceID: serviceID, size: 17, fallbackScale: 0.8)
                 .foregroundStyle(ManaColor.textPrimary)
-                .frame(width: 17, height: 17)
             Text("\(serviceID.displayName) Usage")
                 .font(.system(size: 14, weight: .semibold))
                 .tracking(-0.1)
                 .foregroundStyle(ManaColor.textPrimary)
+            if isRefreshing {
+                Spacer(minLength: 8)
+                // ТЗ §4.3 live-feedback fix: the only visible cue that a
+                // manual refresh (or the launch-time re-check of a
+                // disk-cache-seeded snapshot) is actually in flight — never
+                // hides `dataSection`/`errorSection`, just sits alongside.
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.7)
+            }
         }
     }
 
     // MARK: Data state (design-spec.md §3.7.2, §3.7.3)
 
-    private var dataSection: some View {
+    private func dataSection(usage: ServiceUsage) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let sessionWindow = usage?.sessionWindow {
+            if let sessionWindow = usage.sessionWindow {
                 sectionRow(title: "Current session", window: sessionWindow, style: .relative, animatesFill: true)
             }
-            if let weeklyWindow = usage?.weeklyWindow {
+            if let weeklyWindow = usage.weeklyWindow {
                 sectionRow(title: "All models", window: weeklyWindow, style: .absolute, animatesFill: false)
             }
-            ForEach(Array(modelWeeklyWindows.enumerated()), id: \.offset) { _, window in
+            ForEach(Array(modelWeeklyWindows(in: usage).enumerated()), id: \.offset) { _, window in
                 sectionRow(title: window.label, window: window, style: .absolute, animatesFill: false)
             }
-            if let sessionWindow = usage?.sessionWindow, sessionWindow.usedPercent >= 100 {
+            if let sessionWindow = usage.sessionWindow, sessionWindow.usedPercent >= 100 {
                 exhaustedMessage(sessionWindow: sessionWindow)
             }
         }
@@ -170,13 +205,39 @@ struct DetailCardView: View {
             .padding(.top, 16)
     }
 
-    // MARK: Error state (design-spec.md §3.7.4, §8.2; ТЗ §4.3)
+    // MARK: Stale state — data visible, compact warning line underneath
 
-    private var isKeychainAccessDenied: Bool {
-        if case .keychainAccessDenied = status.error { return true }
-        return false
+    /// design-spec.md doesn't have a dedicated "data + warning" treatment, so
+    /// this deliberately stays much quieter than `errorSection`: no button,
+    /// small faint text, single line — the numbers above are still the
+    /// primary content (ТЗ §4.3: "серое кольцо + текст ошибки, но цифры
+    /// остаются видны").
+    private func staleWarningRow(_ error: UsageError) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(ManaColor.textVeryFaint)
+            Text(error.userDescription)
+                .font(.system(size: 11))
+                .lineSpacing(11 * 0.4)
+                .foregroundStyle(ManaColor.textVeryFaint)
+        }
+        .padding(.top, 10)
     }
 
+    // MARK: Error state (design-spec.md §3.7.4, §8.2; ТЗ §4.3) — no data at all
+
+    /// CLI login hint for `.notLoggedIn`/`.sessionExpired`/`.missingScope`:
+    /// names the actual CLI tool for this service, since "Re-login via CLI"
+    /// alone doesn't say which one.
+    private var cliLoginHint: String {
+        switch serviceID {
+        case .claude: return "Залогиньтесь через `claude` в терминале, затем нажмите кнопку."
+        case .chatgpt: return "Залогиньтесь через `codex` в терминале, затем нажмите кнопку."
+        }
+    }
+
+    @ViewBuilder
     private var errorSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(status.error?.userDescription ?? "")
@@ -184,7 +245,21 @@ struct DetailCardView: View {
                 .lineSpacing(13 * 0.45)
                 .foregroundStyle(ManaColor.textFaint)
 
-            if isKeychainAccessDenied {
+            switch status.error {
+            case .rateLimited?:
+                // Live-feedback fix: this used to show a "Re-login via CLI"
+                // button that visibly did nothing, because a rate limit isn't
+                // an auth problem — manual refresh still respects this exact
+                // cooldown (`UsageCoordinator.eligible`). No button at all;
+                // just say when Mana will try again on its own.
+                if let hint = ResetFormatter.rateLimitRetryHint(cooldownUntil: cooldownUntil) {
+                    Text("Повторим автоматически \(hint).")
+                        .font(.system(size: 11.5))
+                        .lineSpacing(11.5 * 0.4)
+                        .foregroundStyle(ManaColor.textVeryFaint)
+                }
+
+            case .keychainAccessDenied?:
                 // ТЗ addendum (silent-path Keychain fix): the permission is a
                 // one-time grant, not a re-login — spell that out so the user
                 // knows a single click fixes it for good.
@@ -192,20 +267,36 @@ struct DetailCardView: View {
                     .font(.system(size: 11.5))
                     .lineSpacing(11.5 * 0.4)
                     .foregroundStyle(ManaColor.textVeryFaint)
-            }
+                actionButton(title: "Grant access")
 
-            Button(action: onErrorAction) {
-                Text(isKeychainAccessDenied ? "Grant access" : "Re-login via CLI")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(ManaColor.reloginText)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
+            case .notLoggedIn?, .sessionExpired?, .missingScope?:
+                Text(cliLoginHint)
+                    .font(.system(size: 11.5))
+                    .lineSpacing(11.5 * 0.4)
+                    .foregroundStyle(ManaColor.textVeryFaint)
+                actionButton(title: "Re-login via CLI")
+
+            case .connectionFailed?, .requestFailed?, .decodingFailed?:
+                actionButton(title: "Retry")
+
+            case nil:
+                EmptyView()
             }
-            .buttonStyle(.plain)
-            .background(ManaColor.reloginBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .padding(.top, 16)
+    }
+
+    private func actionButton(title: String) -> some View {
+        Button(action: onErrorAction) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(ManaColor.reloginText)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+        }
+        .buttonStyle(.plain)
+        .background(ManaColor.reloginBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -239,8 +330,15 @@ private struct CardArrow: Shape {
     HStack(alignment: .top, spacing: 24) {
         DetailCardView(serviceID: .claude, status: .ready(.placeholder))
         DetailCardView(serviceID: .claude, status: .unavailable(.keychainAccessDenied))
-        DetailCardView(serviceID: .chatgpt, status: .stale(.placeholder, .connectionFailed))
+        DetailCardView(serviceID: .chatgpt, status: .stale(.placeholder, .connectionFailed), isRefreshing: true)
         DetailCardView(serviceID: .claude, status: .loading)
+        DetailCardView(
+            serviceID: .claude,
+            status: .unavailable(.rateLimited(retryAfter: 120)),
+            cooldownUntil: Date().addingTimeInterval(120)
+        )
+        DetailCardView(serviceID: .chatgpt, status: .unavailable(.notLoggedIn))
+        DetailCardView(serviceID: .claude, status: .unavailable(.connectionFailed))
     }
     .padding(40)
     .background(Color.gray)

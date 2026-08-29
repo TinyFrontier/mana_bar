@@ -79,6 +79,10 @@ final class UsageCoordinator {
     private let fetchTimeout: TimeInterval
     private let now: @Sendable () -> Date
     private let onUsageUpdated: (@MainActor (ServiceUsage) -> Void)?
+    /// Disk-backed last-good-snapshot store (research doc §9 п.7). `nil` in
+    /// most tests, which have no interest in touching disk; `AppDelegate`
+    /// wires a real one in production.
+    private let snapshotCache: UsageSnapshotCache?
 
     /// Mutable so `updateRefreshInterval(_:)` (ТЗ §6: refresh interval
     /// setting) can change it and reschedule the pending timer.
@@ -110,6 +114,7 @@ final class UsageCoordinator {
         observesWake: Bool = true,
         fetchTimeout: TimeInterval = 15,
         onUsageUpdated: (@MainActor (ServiceUsage) -> Void)? = nil,
+        snapshotCache: UsageSnapshotCache? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.model = model
@@ -120,6 +125,7 @@ final class UsageCoordinator {
         self.observesWake = observesWake
         self.fetchTimeout = fetchTimeout
         self.onUsageUpdated = onUsageUpdated
+        self.snapshotCache = snapshotCache
         self.now = now
         for id in model.serviceOrder { pollState[id] = PollState() }
     }
@@ -137,7 +143,7 @@ final class UsageCoordinator {
     /// and the sleep/wake observer. Call once, from `AppDelegate`.
     func start() {
         Task { [weak self] in
-            await self?.pollAll(reason: .launch)
+            await self?.performLaunchPoll()
         }
         scheduleTimer()
         guard observesWake else { return }
@@ -149,6 +155,34 @@ final class UsageCoordinator {
             Task { @MainActor in
                 await self?.handleWake()
             }
+        }
+    }
+
+    /// Seeds `model` from the on-disk cache (research doc §9 п.7), then
+    /// performs the immediate launch-time fetch that re-verifies it — a
+    /// snapshot from a previous run/app-version is never trusted past
+    /// app-launch, only ever shown as an immediately-superseded starting
+    /// point. Internal, not private, so tests can drive it deterministically
+    /// instead of racing `start()`'s unstructured `Task`.
+    func performLaunchPoll() async {
+        seedFromDiskCache()
+        await pollAll(reason: .launch)
+    }
+
+    /// For every service that has no data yet in `model` (first run in this
+    /// process) but does have a cached snapshot on disk, shows that snapshot
+    /// immediately, marked `refreshingServiceIDs` so the UI can indicate
+    /// "this is being re-verified" without discarding it — cleared the
+    /// moment the very next poll (success or failure) resolves. Never
+    /// overwrites data `model` already has (e.g. a second, redundant call).
+    func seedFromDiskCache() {
+        guard let snapshotCache else { return }
+        let cached = snapshotCache.load()
+        for id in order {
+            guard let usage = cached[id] else { continue }
+            guard model.status(for: id).usage == nil else { continue }
+            model.setStatus(.ready(usage), for: id)
+            model.setRefreshing(true, for: id)
         }
     }
 
@@ -269,6 +303,25 @@ final class UsageCoordinator {
 
         inFlight.insert(id)
         defer { inFlight.remove(id) }
+        // Clears whatever `refreshingServiceIDs` marking either this call (see
+        // below, `.manual`) or `seedFromDiskCache()` (`.launch`) applied —
+        // unconditional and idempotent, since clearing a flag that was never
+        // set is a harmless no-op for every other reason.
+        defer { model.setRefreshing(false, for: id) }
+
+        // Live-feedback fix: clicking the detail card's Re-login/Retry/Grant-
+        // access button used to visibly do nothing until the fetch resolved.
+        // A service with no data yet also flips to `.loading` so the ring/
+        // card show the spinner instead of sitting on the old error text for
+        // the whole round trip; a service that already has last-good data
+        // (`.stale`) keeps showing it — only `refreshingServiceIDs` changes —
+        // so a manual refresh can never make numbers disappear.
+        if reason == .manual {
+            model.setRefreshing(true, for: id)
+            if model.status(for: id).usage == nil {
+                model.setStatus(.loading, for: id)
+            }
+        }
 
         let provider = reason == .manual ? pair.interactive : pair.silent
         do {
@@ -321,6 +374,14 @@ final class UsageCoordinator {
     private func recordSuccess(id: ServiceID, usage: ServiceUsage) {
         pollState[id] = PollState()
         model.setStatus(.ready(usage), for: id)
+        // A fresh success always clears any rate-limit countdown the UI was
+        // showing (ТЗ §4.3 live-feedback fix).
+        model.setCooldownUntil(nil, for: id)
+        // research doc §9 п.7: every successful fetch becomes the new
+        // "last-good" on disk, so the *next* app launch has something to seed
+        // from. Never contains tokens/credentials — `ServiceUsage` doesn't
+        // carry any.
+        snapshotCache?.save(usage)
         // Clean integration point for ТЗ §5 notifications: every successful
         // fetch's fresh snapshot is handed to whoever wants to react to it
         // (`NotificationManager.evaluate`, wired by `AppDelegate`) — the
@@ -338,7 +399,13 @@ final class UsageCoordinator {
             isRateLimit = false
             cooldownSeconds = fixedCooldown
         }
-        pollState[id] = PollState(cooldownUntil: now().addingTimeInterval(cooldownSeconds), cooldownIsRateLimit: isRateLimit)
+        let cooldownDeadline = now().addingTimeInterval(cooldownSeconds)
+        pollState[id] = PollState(cooldownUntil: cooldownDeadline, cooldownIsRateLimit: isRateLimit)
+        // Only a rate-limit deadline is meaningful to show the user (ТЗ §4.3
+        // live-feedback fix: the plain post-failure cooldown is timer hygiene
+        // the user never needs to see, and manual refresh bypasses it anyway
+        // — see `eligible(_:reason:)`).
+        model.setCooldownUntil(isRateLimit ? cooldownDeadline : nil, for: id)
 
         // Last good snapshot is never wiped (research doc §9 п.1): downgrade
         // .ready/.stale to .stale with the same usage; only go to
