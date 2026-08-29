@@ -87,20 +87,23 @@ final class PanelWindow: NSPanel {
             screenFrame: screen.frame,
             serviceCount: model.serviceOrder.count,
             verticalPosition: AppSettings.shared.verticalPosition,
-            edge: dockEdge
+            edge: dockEdge,
+            verticalOffset: CGFloat(AppSettings.shared.verticalOffset)
         )
     }
 
     /// Docked frame: flush against the screen edge (ТЗ §3.2 — панель прижата
     /// к краю), vertically positioned per `AppSettings.verticalPosition`
-    /// (ТЗ §3.1, §6). All of the math lives in `PanelLayoutMetrics
-    /// .dockedFrame`, which is pure and unit-tested (`PanelFrameTests`).
+    /// plus the free `AppSettings.verticalOffset` shift (ТЗ §6). All of the
+    /// math lives in `PanelLayoutMetrics.dockedFrame`, which is pure and
+    /// unit-tested (`PanelFrameTests`).
     private func shownFrame(on screen: NSScreen) -> NSRect {
         PanelLayoutMetrics.dockedFrame(
             screenFrame: screen.frame,
             serviceCount: model.serviceOrder.count,
             verticalPosition: AppSettings.shared.verticalPosition,
-            edge: dockEdge
+            edge: dockEdge,
+            verticalOffset: CGFloat(AppSettings.shared.verticalOffset)
         )
     }
 

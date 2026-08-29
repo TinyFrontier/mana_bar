@@ -33,6 +33,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.enabledServiceIDs, Set(ServiceID.allCases))
         XCTAssertEqual(settings.panelEdge, .right)
         XCTAssertEqual(settings.verticalPosition, .center)
+        XCTAssertEqual(settings.verticalOffset, 0)
         XCTAssertNil(settings.preferredScreenID)
         XCTAssertEqual(settings.refreshInterval, .twoMinutes)
         XCTAssertEqual(settings.warningThreshold, 0.5)
@@ -48,6 +49,12 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.effectiveServiceOrder, ServiceID.allCases)
     }
 
+    // MARK: - Vertical offset slider bound (ТЗ §6 "свободное смещение")
+
+    func testVerticalOffsetRangeIsSymmetric() {
+        XCTAssertEqual(AppSettings.verticalOffsetRange, -400...400)
+    }
+
     // MARK: - Round trip (ТЗ §6: persisted via UserDefaults)
 
     func testRoundTripPersistsEveryField() {
@@ -57,6 +64,7 @@ final class AppSettingsTests: XCTestCase {
         first.enabledServiceIDs = [.claude]
         first.panelEdge = .left
         first.verticalPosition = .top
+        first.verticalOffset = -137.5
         first.preferredScreenID = 42
         first.refreshInterval = .fiveMinutes
         first.warningThreshold = 0.3
@@ -78,6 +86,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(second.enabledServiceIDs, [.claude])
         XCTAssertEqual(second.panelEdge, .left)
         XCTAssertEqual(second.verticalPosition, .top)
+        XCTAssertEqual(second.verticalOffset, -137.5)
         XCTAssertEqual(second.preferredScreenID, 42)
         XCTAssertEqual(second.refreshInterval, .fiveMinutes)
         XCTAssertEqual(second.warningThreshold, 0.3)

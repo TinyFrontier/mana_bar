@@ -8,12 +8,15 @@ enum PanelEdge: String, Codable, CaseIterable {
     case left
 }
 
-/// Vertical placement of the panel along the chosen edge (ТЗ §6).
+/// Vertical placement of the panel along the chosen edge (ТЗ §6). The
+/// "свободное смещение" (free offset) half of §6 is `AppSettings
+/// .verticalOffset` — a continuous points shift layered on top of whichever
+/// anchor is chosen here, rather than a fourth case, since it composes with
+/// all three (e.g. "centered, but 120pt higher").
 enum PanelVerticalPosition: String, Codable, CaseIterable {
     case top
     case center
     case bottom
-    // TODO: free-offset variant per ТЗ §6 ("свободное смещение").
 }
 
 /// Background-poll interval options (ТЗ §4.3).
@@ -37,6 +40,12 @@ enum RefreshInterval: Int, Codable, CaseIterable {
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
+    /// Slider bound for `verticalOffset` (ТЗ §6) — generous enough to reach
+    /// most of the screen on common displays without a per-monitor bound,
+    /// while `PanelLayoutMetrics` still clamps the *effective* on-screen
+    /// position so the island can never be dragged off-screen regardless.
+    static let verticalOffsetRange: ClosedRange<Double> = -400...400
+
     private let defaults: UserDefaults
     /// Suppresses `saveIfNeeded()` while `load()` is assigning stored values
     /// back onto `@Published` properties, so restoring state doesn't cause a
@@ -56,6 +65,15 @@ final class AppSettings: ObservableObject {
 
     @Published var panelEdge: PanelEdge = .right { didSet { saveIfNeeded() } }
     @Published var verticalPosition: PanelVerticalPosition = .center { didSet { saveIfNeeded() } }
+    /// Free vertical shift in points added on top of `verticalPosition`'s
+    /// center/top/bottom anchor (ТЗ §6 "свободное смещение") — positive
+    /// moves the panel up. `PanelLayoutMetrics.dockedOriginY`/`dockedFrame`
+    /// clamp the *effective* position so the island never slides past the
+    /// screen edge; this raw value is left unclamped so a saved preference
+    /// survives verbatim even if `verticalOffsetRange` narrows in a future
+    /// build. The Settings slider itself restricts input to
+    /// `verticalOffsetRange`.
+    @Published var verticalOffset: Double = 0 { didSet { saveIfNeeded() } }
     /// nil = screen with cursor (ТЗ §6 default). TODO: explicit monitor
     /// picker for multi-monitor setups — simplified to the cursor-screen
     /// default for this wave; `AppDelegate.currentScreen()` doesn't consult
@@ -115,6 +133,7 @@ final class AppSettings: ObservableObject {
         defaults.set(enabledServiceIDs.map(\.rawValue), forKey: Keys.enabledServiceIDs)
         defaults.set(panelEdge.rawValue, forKey: Keys.panelEdge)
         defaults.set(verticalPosition.rawValue, forKey: Keys.verticalPosition)
+        defaults.set(verticalOffset, forKey: Keys.verticalOffset)
         if let preferredScreenID {
             defaults.set(Int(preferredScreenID), forKey: Keys.preferredScreenID)
         } else {
@@ -150,6 +169,9 @@ final class AppSettings: ObservableObject {
         }
         if let raw = defaults.string(forKey: Keys.verticalPosition), let value = PanelVerticalPosition(rawValue: raw) {
             verticalPosition = value
+        }
+        if defaults.object(forKey: Keys.verticalOffset) != nil {
+            verticalOffset = defaults.double(forKey: Keys.verticalOffset)
         }
         if defaults.object(forKey: Keys.preferredScreenID) != nil {
             preferredScreenID = CGDirectDisplayID(defaults.integer(forKey: Keys.preferredScreenID))
@@ -195,6 +217,7 @@ final class AppSettings: ObservableObject {
         static let enabledServiceIDs = "mana.settings.enabledServiceIDs"
         static let panelEdge = "mana.settings.panelEdge"
         static let verticalPosition = "mana.settings.verticalPosition"
+        static let verticalOffset = "mana.settings.verticalOffset"
         static let preferredScreenID = "mana.settings.preferredScreenID"
         static let refreshInterval = "mana.settings.refreshInterval"
         static let warningThreshold = "mana.settings.warningThreshold"

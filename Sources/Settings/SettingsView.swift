@@ -81,6 +81,8 @@ struct SettingsView: View {
                 Text("Bottom").tag(PanelVerticalPosition.bottom)
             }
 
+            verticalOffsetControl
+
             LabeledContent("Monitor") {
                 Text("Screen with cursor")
                     .foregroundStyle(.secondary)
@@ -93,6 +95,32 @@ struct SettingsView: View {
 
             Toggle("Show percent under rings", isOn: $settings.showPercentUnderRings)
             Toggle("Hide over full-screen apps", isOn: $settings.hidePanelOverFullScreen)
+        }
+    }
+
+    /// Free vertical shift on top of the center/top/bottom anchor (ТЗ §6
+    /// "свободное смещение") — e.g. "panel higher than dead-center".
+    /// `PanelLayoutMetrics` clamps the effective position at the screen
+    /// edges, so dragging to an extreme value here is harmless; it just
+    /// stops moving the panel once the island reaches the edge.
+    private var verticalOffsetControl: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Vertical offset")
+                Spacer()
+                Text("\(Int(settings.verticalOffset.rounded())) pt")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                Button("Reset") { settings.verticalOffset = 0 }
+                    .buttonStyle(.borderless)
+                    .disabled(settings.verticalOffset == 0)
+            }
+            Slider(
+                value: $settings.verticalOffset,
+                in: AppSettings.verticalOffsetRange,
+                step: 5
+            )
         }
     }
 

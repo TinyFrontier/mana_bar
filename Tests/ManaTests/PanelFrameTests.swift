@@ -17,13 +17,15 @@ final class PanelFrameTests: XCTestCase {
     private func frame(
         screen: CGRect,
         position: PanelVerticalPosition = .center,
-        edge: PanelEdge = .right
+        edge: PanelEdge = .right,
+        verticalOffset: CGFloat = 0
     ) -> CGRect {
         PanelLayoutMetrics.dockedFrame(
             screenFrame: screen,
             serviceCount: serviceCount,
             verticalPosition: position,
-            edge: edge
+            edge: edge,
+            verticalOffset: verticalOffset
         )
     }
 
@@ -103,6 +105,82 @@ final class PanelFrameTests: XCTestCase {
         )
     }
 
+    // MARK: - Vertical offset (ТЗ §6 "свободное смещение")
+
+    /// A moderate offset just shifts the island by exactly that many points
+    /// off whichever anchor (center/top/bottom) is selected — positive moves
+    /// it up, matching AppKit's bottom-left-origin screen coordinates.
+    func testVerticalOffsetShiftsIslandFromItsAnchor() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+
+        let unshifted = frame(screen: screen, position: .center)
+        let shiftedUp = frame(screen: screen, position: .center, verticalOffset: 120)
+        XCTAssertEqual(islandCenterY(in: shiftedUp), islandCenterY(in: unshifted) + 120, accuracy: 0.001)
+
+        let shiftedDown = frame(screen: screen, position: .center, verticalOffset: -80)
+        XCTAssertEqual(islandCenterY(in: shiftedDown), islandCenterY(in: unshifted) - 80, accuracy: 0.001)
+
+        // Composes with .top/.bottom too, not just .center.
+        let topUnshifted = frame(screen: screen, position: .top)
+        let topShifted = frame(screen: screen, position: .top, verticalOffset: -50)
+        XCTAssertEqual(islandCenterY(in: topShifted), islandCenterY(in: topUnshifted) - 50, accuracy: 0.001)
+
+        // The horizontal edge and container size are unaffected.
+        XCTAssertEqual(shiftedUp.maxX, screen.maxX, accuracy: 0.001)
+        XCTAssertEqual(shiftedUp.size, unshifted.size)
+    }
+
+    /// However large the configured offset, the *island* must never slide
+    /// past the screen's top/bottom edge — only the (much taller) container,
+    /// which already overhangs by design to host the card flyout, is allowed
+    /// to extend past the screen.
+    func testVerticalOffsetClampsAtScreenEdges() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let islandHeight = PanelLayoutMetrics.panelHeight(serviceCount: serviceCount)
+        let minIslandCenterY = screen.minY + islandHeight / 2
+        let maxIslandCenterY = screen.maxY - islandHeight / 2
+
+        // Way beyond the slider's own ±400 UI bound (AppSettings
+        // .verticalOffsetRange) — the layout math itself must still hold.
+        let pushedToTop = frame(screen: screen, position: .center, verticalOffset: 10_000)
+        XCTAssertEqual(islandCenterY(in: pushedToTop), maxIslandCenterY, accuracy: 0.001)
+
+        let pushedToBottom = frame(screen: screen, position: .center, verticalOffset: -10_000)
+        XCTAssertEqual(islandCenterY(in: pushedToBottom), minIslandCenterY, accuracy: 0.001)
+
+        // Clamping composes with .top/.bottom anchors too: a large enough
+        // negative offset from .top still stops at the bottom edge, not
+        // beyond it.
+        let topPushedToBottom = frame(screen: screen, position: .top, verticalOffset: -10_000)
+        XCTAssertEqual(islandCenterY(in: topPushedToBottom), minIslandCenterY, accuracy: 0.001)
+
+        // A moderate offset that's already within bounds is untouched by
+        // clamping (regression guard against an over-eager clamp).
+        let withinBounds = frame(screen: screen, position: .center, verticalOffset: 50)
+        XCTAssertEqual(islandCenterY(in: withinBounds), screen.midY + 50, accuracy: 0.001)
+    }
+
+    /// The hot-zone strip must track the offset exactly the same way, or
+    /// hovering near the (now-shifted) island stops reaching the invisible
+    /// strip that's supposed to be right under it.
+    func testHotZoneStripTracksVerticalOffset() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let islandHeight = PanelLayoutMetrics.panelHeight(serviceCount: serviceCount)
+
+        for offset: CGFloat in [-300, 0, 150, 10_000, -10_000] {
+            let docked = frame(screen: screen, position: .center, verticalOffset: offset)
+            let strip = HotZoneGeometry.rect(
+                screenFrame: screen,
+                panelHeight: islandHeight,
+                width: 3,
+                edge: .right,
+                verticalPosition: .center,
+                verticalOffset: offset
+            )
+            XCTAssertEqual(strip.midY, docked.midY, accuracy: 0.001, "offset \(offset): strip must sit over the shifted island")
+        }
+    }
+
     // MARK: - Off-screen (slide origin/destination)
 
     func testOffscreenFrameSitsJustPastTheEdgeAtTheSameHeight() {
@@ -125,6 +203,21 @@ final class PanelFrameTests: XCTestCase {
             edge: .left
         )
         XCTAssertEqual(hiddenLeft.maxX, screen.minX, accuracy: 0.001)
+    }
+
+    /// The slide-in/out animation must not visibly jump vertically once
+    /// `verticalOffset` is in play — same regression as the zero-offset case
+    /// above, just with a shift applied to both ends.
+    func testOffscreenFrameTracksVerticalOffset() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let docked = frame(screen: screen, verticalOffset: 90)
+        let hidden = PanelLayoutMetrics.offscreenFrame(
+            screenFrame: screen,
+            serviceCount: serviceCount,
+            verticalPosition: .center,
+            verticalOffset: 90
+        )
+        XCTAssertEqual(hidden.origin.y, docked.origin.y, accuracy: 0.001)
     }
 
     // MARK: - Agreement with the hot zone (ТЗ §3.1: strip must sit under the island)

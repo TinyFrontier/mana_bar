@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotZoneMonitor.panelHeight = PanelLayoutMetrics.panelHeight(serviceCount: panelModel.serviceOrder.count)
         hotZoneMonitor.edge = AppSettings.shared.panelEdge
         hotZoneMonitor.verticalPosition = AppSettings.shared.verticalPosition
+        hotZoneMonitor.verticalOffset = CGFloat(AppSettings.shared.verticalOffset)
         hotZoneMonitor.appearDelay = TimeInterval(AppSettings.shared.appearDelayMs) / 1000
         hotZoneMonitor.disappearDelay = TimeInterval(AppSettings.shared.disappearDelayMs) / 1000
         hotZoneMonitor.panelHitTestFrame = { [weak panelWindow] in panelWindow?.hitTestFrame }
@@ -270,6 +271,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .sink { [weak self] verticalPosition in
                 self?.hotZoneMonitor?.verticalPosition = verticalPosition
+                self?.repositionPanel()
+            }
+            .store(in: &settingsSubscriptions)
+
+        settings.$verticalOffset
+            .dropFirst()
+            .sink { [weak self] offset in
+                self?.hotZoneMonitor?.verticalOffset = CGFloat(offset)
                 self?.repositionPanel()
             }
             .store(in: &settingsSubscriptions)

@@ -45,6 +45,12 @@ final class HotZoneMonitor {
     /// pattern as `edge` — must track `PanelWindow`'s own placement or the
     /// invisible hot-zone strip and the visible panel drift apart.
     var verticalPosition: PanelVerticalPosition = .center
+    /// User-configured vertical shift in points (ТЗ §6 "свободное
+    /// смещение"), same plain-pushed-in pattern as `edge`/`verticalPosition`
+    /// — `AppDelegate` copies `AppSettings.verticalOffset` in on launch and
+    /// on every change, so the invisible hot-zone strip tracks the visible
+    /// panel instead of drifting apart from it.
+    var verticalOffset: CGFloat = 0
 
     var appearDelay: TimeInterval = 0.12
     var disappearDelay: TimeInterval = 0.35
@@ -146,7 +152,8 @@ final class HotZoneMonitor {
             panelHeight: panelHeight,
             width: hotZoneWidth,
             edge: edge,
-            verticalPosition: verticalPosition
+            verticalPosition: verticalPosition,
+            verticalOffset: verticalOffset
         )
         if HotZoneGeometry.contains(point, in: hotZone) {
             return true

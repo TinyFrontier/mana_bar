@@ -20,26 +20,37 @@ enum HotZoneGeometry {
     ///     and the visible panel drift apart.
     ///   - margin: gap from the screen's top/bottom edge for the
     ///     `.top`/`.bottom` cases; ignored for `.center`.
+    ///   - verticalOffset: same user-configured shift `PanelLayoutMetrics
+    ///     .dockedOriginY` applies to the visible island
+    ///     (`AppSettings.verticalOffset`) — must be threaded through here too
+    ///     or the invisible hot-zone strip drifts away from the panel it's
+    ///     supposed to sit under. Clamped identically (island/strip never
+    ///     slides past the screen's top/bottom edge).
     static func rect(
         screenFrame: CGRect,
         panelHeight: CGFloat,
         width: CGFloat = 3,
         edge: PanelEdge = .right,
         verticalPosition: PanelVerticalPosition = .center,
-        margin: CGFloat = PanelLayoutMetrics.verticalEdgeMargin
+        margin: CGFloat = PanelLayoutMetrics.verticalEdgeMargin,
+        verticalOffset: CGFloat = 0
     ) -> CGRect {
         let x: CGFloat
         switch edge {
         case .right: x = screenFrame.maxX - width
         case .left: x = screenFrame.minX
         }
-        let y: CGFloat
+        let anchorCenterY: CGFloat
         switch verticalPosition {
-        case .center: y = screenFrame.midY - panelHeight / 2
-        case .top: y = screenFrame.maxY - margin - panelHeight
-        case .bottom: y = screenFrame.minY + margin
+        case .center: anchorCenterY = screenFrame.midY
+        case .top: anchorCenterY = screenFrame.maxY - margin - panelHeight / 2
+        case .bottom: anchorCenterY = screenFrame.minY + margin + panelHeight / 2
         }
-        return CGRect(x: x, y: y, width: width, height: panelHeight)
+        let minCenterY = screenFrame.minY + panelHeight / 2
+        let maxCenterY = screenFrame.maxY - panelHeight / 2
+        let candidate = anchorCenterY + verticalOffset
+        let centerY = minCenterY <= maxCenterY ? min(max(candidate, minCenterY), maxCenterY) : candidate
+        return CGRect(x: x, y: centerY - panelHeight / 2, width: width, height: panelHeight)
     }
 
     /// O(1) point-in-rect hit test.

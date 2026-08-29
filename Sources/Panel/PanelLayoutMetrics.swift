@@ -74,24 +74,57 @@ enum PanelLayoutMetrics {
     /// `PanelView` always centers the island vertically inside it — so
     /// `.top`/`.bottom` describe where the **island** should sit, and the
     /// container origin is backed out from that.
+    ///
+    /// - Parameter verticalOffset: additional user-configured shift in
+    ///   points (ТЗ §6 "свободное смещение"; `AppSettings.verticalOffset`),
+    ///   added to the anchor (center/top/bottom) *before* clamping — positive
+    ///   moves the island up, matching AppKit's bottom-left-origin screen
+    ///   coordinates. The result is clamped so the island itself never slides
+    ///   past the screen's top/bottom edge, however large the configured
+    ///   offset — the container (which reserves extra room for the card
+    ///   flyout) is allowed to overhang, same as the un-offset `.top`/
+    ///   `.bottom` cases already do.
     static func dockedOriginY(
         screenFrame: CGRect,
         serviceCount: Int,
         verticalPosition: PanelVerticalPosition,
-        margin: CGFloat = verticalEdgeMargin
+        margin: CGFloat = verticalEdgeMargin,
+        verticalOffset: CGFloat = 0
     ) -> CGFloat {
         let containerHeight = containerHeight(serviceCount: serviceCount)
         let islandHeight = panelHeight(serviceCount: serviceCount)
+        let anchorIslandCenterY: CGFloat
         switch verticalPosition {
         case .center:
-            return screenFrame.midY - containerHeight / 2
+            anchorIslandCenterY = screenFrame.midY
         case .top:
-            let islandCenterY = screenFrame.maxY - margin - islandHeight / 2
-            return islandCenterY - containerHeight / 2
+            anchorIslandCenterY = screenFrame.maxY - margin - islandHeight / 2
         case .bottom:
-            let islandCenterY = screenFrame.minY + margin + islandHeight / 2
-            return islandCenterY - containerHeight / 2
+            anchorIslandCenterY = screenFrame.minY + margin + islandHeight / 2
         }
+        let islandCenterY = clampedIslandCenterY(
+            anchorIslandCenterY + verticalOffset,
+            screenFrame: screenFrame,
+            islandHeight: islandHeight
+        )
+        return islandCenterY - containerHeight / 2
+    }
+
+    /// Clamps a candidate island-center Y so the island rect
+    /// (`[center - islandHeight/2, center + islandHeight/2]`) stays within
+    /// `screenFrame` — the "island must not slide past the top/bottom edge"
+    /// guarantee `verticalOffset` needs. Falls back to the unclamped value
+    /// when the island is taller than the screen itself (degenerate/test
+    /// input, where min > max and clamping would invert the range).
+    private static func clampedIslandCenterY(
+        _ candidate: CGFloat,
+        screenFrame: CGRect,
+        islandHeight: CGFloat
+    ) -> CGFloat {
+        let minCenterY = screenFrame.minY + islandHeight / 2
+        let maxCenterY = screenFrame.maxY - islandHeight / 2
+        guard minCenterY <= maxCenterY else { return candidate }
+        return min(max(candidate, minCenterY), maxCenterY)
     }
 
     /// Docked (fully visible) window frame, flush against the chosen screen
@@ -110,7 +143,8 @@ enum PanelLayoutMetrics {
         serviceCount: Int,
         verticalPosition: PanelVerticalPosition,
         edge: PanelEdge = .right,
-        margin: CGFloat = verticalEdgeMargin
+        margin: CGFloat = verticalEdgeMargin,
+        verticalOffset: CGFloat = 0
     ) -> CGRect {
         let size = containerSize(serviceCount: serviceCount)
         let x: CGFloat
@@ -125,7 +159,8 @@ enum PanelLayoutMetrics {
                     screenFrame: screenFrame,
                     serviceCount: serviceCount,
                     verticalPosition: verticalPosition,
-                    margin: margin
+                    margin: margin,
+                    verticalOffset: verticalOffset
                 )
             ),
             size: size
@@ -140,14 +175,16 @@ enum PanelLayoutMetrics {
         serviceCount: Int,
         verticalPosition: PanelVerticalPosition,
         edge: PanelEdge = .right,
-        margin: CGFloat = verticalEdgeMargin
+        margin: CGFloat = verticalEdgeMargin,
+        verticalOffset: CGFloat = 0
     ) -> CGRect {
         var frame = dockedFrame(
             screenFrame: screenFrame,
             serviceCount: serviceCount,
             verticalPosition: verticalPosition,
             edge: edge,
-            margin: margin
+            margin: margin,
+            verticalOffset: verticalOffset
         )
         switch edge {
         case .right: frame.origin.x = screenFrame.maxX

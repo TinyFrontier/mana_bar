@@ -17,14 +17,21 @@ struct PanelView: View {
     /// toggle) is reflected the moment the panel is next shown, with no
     /// extra wiring beyond this (ТЗ §6).
     @ObservedObject private var settings = AppSettings.shared
-    @State private var hoveredServiceID: ServiceID?
+    /// Owns which ring's `DetailCardView` (if any) should be visible —
+    /// including the ring→gap→card grace period that keeps the card open
+    /// long enough to actually reach it (see type doc comment).
+    @StateObject private var cardHover = CardHoverCoordinator()
 
     /// - Parameter initiallyHovered: seeds the hover state so a specific
     ///   ring's `DetailCardView` starts open — useful for Previews/snapshots;
     ///   real usage (`PanelWindow`) always starts with no ring hovered.
     init(model: PanelModel, initiallyHovered: ServiceID? = nil) {
         self.model = model
-        _hoveredServiceID = State(initialValue: initiallyHovered)
+        let coordinator = CardHoverCoordinator()
+        if let initiallyHovered {
+            coordinator.ringEntered(initiallyHovered)
+        }
+        _cardHover = StateObject(wrappedValue: coordinator)
     }
 
     private var services: [ServiceID] { model.serviceOrder }
@@ -35,7 +42,7 @@ struct PanelView: View {
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            if let hoveredServiceID, let index = services.firstIndex(of: hoveredServiceID) {
+            if let hoveredServiceID = cardHover.displayedServiceID, let index = services.firstIndex(of: hoveredServiceID) {
                 DetailCardView(
                     serviceID: hoveredServiceID,
                     status: model.status(for: hoveredServiceID),
@@ -51,6 +58,11 @@ struct PanelView: View {
                         removal: .opacity.combined(with: .offset(x: -30))
                     ))
                     .id(hoveredServiceID)
+                    // Load-bearing for the bugfix: without this, the card
+                    // itself never registers as a hover source, so the
+                    // coordinator's grace period would immediately expire the
+                    // moment the cursor left the ring, even mid-crossing.
+                    .onHover { isHovering in cardHover.card(isHovering: isHovering) }
             }
 
             island
@@ -69,7 +81,7 @@ struct PanelView: View {
             alignment: .trailing
         )
         // design-spec.md §6.3: card fade+slide, 150ms ease-out.
-        .animation(.easeOut(duration: 0.15), value: hoveredServiceID)
+        .animation(.easeOut(duration: 0.15), value: cardHover.displayedServiceID)
     }
 
     private var island: some View {
@@ -78,9 +90,9 @@ struct PanelView: View {
                 RingView(serviceID: serviceID, status: model.status(for: serviceID), thresholds: thresholds, showPercent: settings.showPercentUnderRings)
                     .onHover { isHovering in
                         if isHovering {
-                            hoveredServiceID = serviceID
-                        } else if hoveredServiceID == serviceID {
-                            hoveredServiceID = nil
+                            cardHover.ringEntered(serviceID)
+                        } else {
+                            cardHover.ringExited(serviceID)
                         }
                     }
             }
