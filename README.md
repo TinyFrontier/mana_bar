@@ -8,6 +8,28 @@ way otherwise.
 
 Full requirements: [`docs/ТЗ-Mana.md`](docs/ТЗ-Mana.md).
 
+## Install
+
+```bash
+brew install --cask TinyFrontier/tap/mana
+```
+
+That taps [TinyFrontier/homebrew-tap](https://github.com/TinyFrontier/homebrew-tap)
+and installs the latest [release](https://github.com/TinyFrontier/mana_bar/releases)
+into `/Applications`. Upgrades come with `brew upgrade --cask mana`, removal
+with `brew uninstall --cask mana` (add `--zap` to also drop settings and the
+usage cache).
+
+Mana is signed with an Apple Development certificate and is **not notarized**
+— that needs a paid Apple Developer Program membership — so macOS would refuse
+to open it after a normal download. The cask strips the quarantine attribute
+from the installed app for you, and says so in its caveats. Installing the
+`.dmg` by hand instead means right-click → Open the app the first time, or:
+
+```bash
+xattr -d com.apple.quarantine /Applications/Mana.app
+```
+
 ## Status
 
 MVP implemented: live providers (Claude via Claude Code CLI / Claude
@@ -108,6 +130,32 @@ Without `MANA_SIGN_IDENTITY`, the identity is picked in this order: first
 -p codesigning`, then first **"Apple Development"** identity, then ad-hoc
 (`-`) as a last resort — ad-hoc is refused by Gatekeeper even more broadly
 than Apple Development, since nothing about the signer is verifiable at all.
+
+## Releasing
+
+```bash
+scripts/release.sh --dry-run   # build, then print what would be published
+scripts/release.sh             # tag, publish, point the cask at the new build
+```
+
+`scripts/release.sh` builds the `.dmg` via `package-dmg.sh`, tags the current
+commit `v<version>`, creates the GitHub Release with the image and its
+`.sha256`, then rewrites the `version` and `sha256` lines in
+[`packaging/homebrew/mana.rb`](packaging/homebrew/mana.rb) and copies the cask
+into the tap checkout (`MANA_TAP_DIR`, defaulting to the directory `brew tap
+TinyFrontier/tap` uses), committing and pushing it when that checkout has an
+`origin` remote.
+
+The version is never invented by the script — it is whatever the built app
+reports. Bump `CFBundleShortVersionString` and `MARKETING_VERSION` in
+`project.yml` first; the script refuses to run if the tag or release already
+exists, if the working tree is dirty, or if `HEAD` differs from its upstream
+branch.
+
+The cask lives in a **separate** repository, as Homebrew requires: taps must
+be named `homebrew-<name>`, so the cask cannot sit in this repository. The
+copy here under `packaging/homebrew/` is the source of truth that the release
+script copies out.
 
 ## Accessibility during development
 

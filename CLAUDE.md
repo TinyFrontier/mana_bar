@@ -94,5 +94,19 @@ xcodebuild -project Mana.xcodeproj -scheme Mana -configuration Debug test -desti
 - **Settings/Notifications**: persisted `AppSettings` wired live;
   UNUserNotificationCenter thresholds with per-window cooldown.
 
+## Distribution
+
+`scripts/package-dmg.sh` builds the signed `.dmg`; `scripts/release.sh` tags,
+publishes the GitHub Release, and updates the Homebrew cask. The cask source
+of truth is `packaging/homebrew/mana.rb`; it is copied into the separate tap
+repository (`TinyFrontier/homebrew-tap`, installed as `TinyFrontier/tap`)
+because Homebrew requires taps to be named `homebrew-<name>`.
+
+Builds are signed with an **Apple Development** identity and are **not
+notarized** (needs a paid Developer Program membership), so Gatekeeper rejects
+them as if downloaded. The cask works around that with a `postflight` that
+strips `com.apple.quarantine`, disclosed in its `caveats`. Drop that block
+once a Developer ID certificate exists.
+
 Known TODOs: explicit monitor picker, deep multi-monitor/Spaces
-handling, .dmg packaging/signing/notarization.
+handling, Developer ID certificate + notarization.
