@@ -235,15 +235,46 @@ final class CodexAuthStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.auth.tokens?.accessToken, "cli.access.sig")
     }
 
-    func testRotationWriteFailureIsSwallowed() throws {
+    /// The `Codex Auth` Keychain item belongs to the `codex` CLI. Writing it
+    /// from Mana's binary rebuilds its ACL around Mana and locks the CLI out of
+    /// its own credentials, so the write-back is file-only (see
+    /// `CodexAuthSource.allowsRotationWriteBack`).
+    func testKeychainSourceIsNeverWrittenBack() throws {
         let directory = TemporaryDirectory(self)
-        let keychain = StubKeychain(items: [
-            "Codex Auth\u{1}": ProviderFixtures.codexAuth(),
-        ])
-        keychain.refusesWrites = true
+        let stored = ProviderFixtures.codexAuth()
+        let keychain = StubKeychain(items: ["Codex Auth\u{1}": stored])
         let store = makeStore(directory: directory, keychain: keychain)
 
-        let credential = try XCTUnwrap(store.loadCredentials().first)
+        var credential = try XCTUnwrap(store.loadCredentials().first)
+        XCTAssertEqual(credential.source, .keychain)
+        credential.auth.tokens?.accessToken = "rotated.access.sig"
+
+        XCTAssertFalse(store.persistRotation(credential, expectedRefreshToken: "fake-refresh-token"))
+        XCTAssertEqual(keychain.value(service: "Codex Auth"), stored)
+    }
+
+    func testRotationWriteFailureIsSwallowed() throws {
+        // Root ignores the directory mode this test relies on to fail the write.
+        try XCTSkipIf(getuid() == 0)
+        let directory = TemporaryDirectory(self)
+        directory.write(ProviderFixtures.codexAuth(), to: "auth.json")
+        let store = makeStore(directory: directory)
+        var credential = try XCTUnwrap(store.loadCredentials().first)
+        credential.auth.tokens?.accessToken = "rotated.access.sig"
+
+        // An atomic write needs a temporary file next to the target, so a
+        // read-only directory fails the write while leaving the read intact.
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o500],
+            ofItemAtPath: directory.path
+        )
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: directory.path
+            )
+        }
+
         XCTAssertFalse(store.persistRotation(credential, expectedRefreshToken: "fake-refresh-token"))
     }
 

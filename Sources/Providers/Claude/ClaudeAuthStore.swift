@@ -38,13 +38,34 @@ enum ClaudeCredentialSource: Equatable, Sendable {
         }
     }
 
-    /// Desktop and environment credentials are owned by another process and
-    /// must never be rewritten by Mana (research doc §9.3: rotating Claude
-    /// Desktop's token would log the user out of Desktop).
-    var isWritable: Bool {
+    /// Whether Mana may run its own refresh against this source. Desktop and
+    /// environment credentials are owned by another process and must never be
+    /// rotated by Mana (research doc §9.3: rotating Claude Desktop's token
+    /// would log the user out of Desktop).
+    var allowsRefresh: Bool {
         switch self {
         case .keychain, .file: return true
         case .desktop, .environment: return false
+        }
+    }
+
+    /// Whether a rotated token may be written back to this source.
+    ///
+    /// The file, yes — it is a plain `~/.claude/.credentials.json` Mana can
+    /// rewrite without side effects. The **Keychain item, no**, even though
+    /// Mana can read it and ТЗ §4.2 originally asked for a write-back to the
+    /// same source: `Claude Code-credentials` is a legacy login-keychain item
+    /// owned by the `claude` CLI, and a `SecItemUpdate` from a different
+    /// binary makes macOS rebuild the item's ACL / partition list around the
+    /// writer. `/usr/bin/security` — the path the CLI reads its own token
+    /// through — drops out of the trusted list, and every later CLI read
+    /// raises the "security wants to access key" password prompt until the
+    /// user re-grants it by hand. Skipping the write-back costs one extra
+    /// refresh round-trip per expiry; the alternative breaks the user's CLI.
+    var allowsRotationWriteBack: Bool {
+        switch self {
+        case .file: return true
+        case .keychain, .desktop, .environment: return false
         }
     }
 
@@ -72,7 +93,7 @@ struct ClaudeCredential: Equatable, Sendable {
     /// Claude Desktop: its refresh token is not even read, so that Desktop's own
     /// session survives (research doc §9.3).
     var canRefresh: Bool {
-        source.isWritable && oauth.refreshToken?.nilIfBlank != nil
+        source.allowsRefresh && oauth.refreshToken?.nilIfBlank != nil
     }
 }
 
@@ -255,7 +276,9 @@ struct ClaudeAuthStore: Sendable {
 
     // MARK: - Rotation write-back
 
-    /// Persists a rotated token back to the source it came from (ТЗ §4.2).
+    /// Persists a rotated token back to the file it came from (ТЗ §4.2, as
+    /// amended: the Keychain item is read-only to Mana — see
+    /// `allowsRotationWriteBack`).
     ///
     /// Best-effort and deliberately silent: the source is re-read first, and if
     /// its refresh token no longer matches the one we started from, another
@@ -264,7 +287,7 @@ struct ClaudeAuthStore: Sendable {
     /// caller treats `false` as a failure worth surfacing.
     @discardableResult
     func persistRotation(_ credential: ClaudeCredential, expectedRefreshToken: String?) -> Bool {
-        guard credential.source.isWritable else { return false }
+        guard credential.source.allowsRotationWriteBack else { return false }
         guard let current = reload(credential.source),
               current.oauth.refreshToken == expectedRefreshToken
         else {
@@ -286,14 +309,8 @@ struct ClaudeAuthStore: Sendable {
         }
 
         do {
-            switch credential.source {
-            case .keychain(let service, let account):
-                try keychain.writeGenericPassword(service: service, account: account, value: text)
-            case .file(let path):
-                try files.writeText(path, text)
-            case .desktop, .environment:
-                return false
-            }
+            guard case .file(let path) = credential.source else { return false }
+            try files.writeText(path, text)
             return true
         } catch {
             // Silent skip: the refreshed token still works for this session, and

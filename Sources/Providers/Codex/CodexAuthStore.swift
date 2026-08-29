@@ -40,6 +40,21 @@ enum CodexAuthSource: Equatable, Sendable {
         return false
     }
 
+    /// Whether a rotated token may be written back to this source.
+    ///
+    /// `auth.json`, yes. The **`Codex Auth` Keychain item, no**, for the reason
+    /// spelled out on `ClaudeCredentialSource.allowsRotationWriteBack`: a
+    /// `SecItemUpdate` from Mana's binary rebuilds a legacy login-keychain
+    /// item's ACL around the writer, which locks the owning CLI out of its own
+    /// credentials and leaves the user with a password prompt on every read.
+    /// Mana reads these items; it does not rewrite them.
+    var allowsRotationWriteBack: Bool {
+        switch self {
+        case .file: return true
+        case .keychain: return false
+        }
+    }
+
     var label: String {
         switch self {
         case .file: return "file"
@@ -232,12 +247,15 @@ struct CodexAuthStore: Sendable {
 
     // MARK: - Rotation write-back
 
-    /// Writes a rotated token back to the source it came from (ТЗ §4.2), after
+    /// Writes a rotated token back to the `auth.json` it came from (ТЗ §4.2, as
+    /// amended: the Keychain item is read-only to Mana — see
+    /// `allowsRotationWriteBack`), after
     /// confirming that source still holds the refresh token we consumed. A
     /// conflict means the `codex` CLI rotated first: skip silently rather than
     /// overwrite, which is what trips `refresh_token_reused` (research doc §9.3).
     @discardableResult
     func persistRotation(_ credential: CodexCredential, expectedRefreshToken: String?) -> Bool {
+        guard credential.source.allowsRotationWriteBack else { return false }
         guard let current = reload(credential.source),
               current.auth.tokens?.refreshToken == expectedRefreshToken
         else {
@@ -258,16 +276,8 @@ struct CodexAuthStore: Sendable {
         }
 
         do {
-            switch credential.source {
-            case .file(let path):
-                try files.writeText(path, text)
-            case .keychain:
-                try keychain.writeGenericPassword(
-                    service: Self.keychainService,
-                    account: nil,
-                    value: text
-                )
-            }
+            guard case .file(let path) = credential.source else { return false }
+            try files.writeText(path, text)
             return true
         } catch {
             return false

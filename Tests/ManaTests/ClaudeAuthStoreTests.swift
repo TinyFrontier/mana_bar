@@ -263,6 +263,30 @@ final class ClaudeAuthStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.oauth.refreshToken, "cli-refresh")
     }
 
+    /// The Keychain item belongs to the `claude` CLI. A `SecItemUpdate` from
+    /// Mana's binary rebuilds its ACL around Mana and locks `/usr/bin/security`
+    /// — the path the CLI reads its own token through — out of it, leaving the
+    /// user with a keychain-password prompt on every CLI read. Mana reads that
+    /// item; it never writes it, refresh or no refresh.
+    func testKeychainSourceIsNeverWrittenBack() throws {
+        let directory = TemporaryDirectory(self)
+        let store0 = makeStore(directory: directory)
+        let service = try XCTUnwrap(store0.keychainServiceCandidates().first)
+        let stored = ProviderFixtures.claudeCredentials(accessToken: "keychain-token")
+        let keychain = StubKeychain(items: ["\(service)\u{1}": stored])
+        let store = makeStore(directory: directory, keychain: keychain)
+
+        var credential = try XCTUnwrap(store.loadCredentials().first)
+        XCTAssertEqual(credential.source.label, "keychain")
+        // Mana may still run the refresh itself — it just keeps the result to
+        // this session instead of writing it back.
+        XCTAssertTrue(credential.canRefresh)
+
+        credential.oauth.accessToken = "rotated-access"
+        XCTAssertFalse(store.persistRotation(credential, expectedRefreshToken: "fake-refresh-token"))
+        XCTAssertEqual(keychain.value(service: service), stored)
+    }
+
     func testDesktopAndEnvironmentSourcesAreNeverWrittenBack() {
         let directory = TemporaryDirectory(self)
         let store = makeStore(directory: directory)

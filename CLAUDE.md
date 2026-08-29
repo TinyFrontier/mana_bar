@@ -19,6 +19,15 @@ notarized .dmg), not sandboxed — see spec for why.
   референса — `docs/research/openusage-core.md`; закреплено в
   `docs/ТЗ-Mana.md` §4.1–4.3.
 
+- **2026-08-29 — write-back ротации только в файлы.** Keychain-записи CLI
+  (`Claude Code-credentials`, `Codex Auth`) Mana **читает, но не переписывает**:
+  `SecItemUpdate` из чужого бинарника пересобирает ACL/partition list записи
+  вокруг того, кто писал, `/usr/bin/security` выпадает из доверенных, и `claude`
+  начинает при каждом чтении просить пароль login-keychain. Точка входа —
+  `allowsRotationWriteBack` в `ClaudeAuthStore.swift` / `CodexAuthStore.swift`;
+  не расширяй его обратно на `.keychain`. Уточнение закреплено в
+  `docs/ТЗ-Mana.md` §4.2 (отменяет прежнее «обратно в тот же источник»).
+
 ## Source of truth
 
 - **Spec**: [`docs/ТЗ-Mana.md`](docs/ТЗ-Mana.md) — read this first for any
