@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <title>Mana</title>
+  <!--
+    Small-size optical variant (logo-kit.html rule: "Ниже 20 px ядро
+    убирается, обводка дуги растёт до 12" — below 20px the core drop
+    disappears and both strokes thicken from 10 to 12, so the ring stays
+    legible at favicon-scale sizes). Use this instead of mana-mark.svg
+    whenever the mark will render below ~20px.
+  -->
+  <defs>
+    <linearGradient id="mana-arc" x1="0.9" y1="0.05" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.55" stop-color="#4ade80"/>
+      <stop offset="1" stop-color="#e8f544"/>
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" stroke-width="12"/>
+  <circle cx="50" cy="50" r="38" fill="none" stroke="url(#mana-arc)" stroke-width="12" stroke-linecap="round" stroke-dasharray="140 99" transform="rotate(-90 50 50)"/>
+</svg>

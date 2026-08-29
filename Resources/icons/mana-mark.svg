@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <title>Mana</title>
+  <defs>
+    <linearGradient id="mana-arc" x1="0.9" y1="0.05" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.55" stop-color="#4ade80"/>
+      <stop offset="1" stop-color="#e8f544"/>
+    </linearGradient>
+    <linearGradient id="mana-core" x1="0.3" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#5cc8ff"/>
+      <stop offset="1" stop-color="#1668d6"/>
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" stroke-width="10"/>
+  <circle cx="50" cy="50" r="38" fill="none" stroke="url(#mana-arc)" stroke-width="10" stroke-linecap="round" stroke-dasharray="140 99" transform="rotate(-90 50 50)"/>
+  <circle cx="50" cy="50" r="15" fill="url(#mana-core)"/>
+</svg>

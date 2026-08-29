@@ -59,13 +59,26 @@ final class StatusBarController {
         configureMenu()
     }
 
+    /// The image assigned to the status item's button, kept for
+    /// verification (a real click-target check needs a running app, but a
+    /// test can at least assert *what* was assigned).
+    private(set) var statusItemImage: NSImage?
+
     private func configureButton() {
         guard let button = statusItem.button else { return }
-        // TODO: replace with a custom mana-drop glyph asset.
-        button.image = NSImage(
-            systemSymbolName: "drop.fill",
-            accessibilityDescription: "Mana"
-        )
+        // ManaMarkTemplate (Sources/Resources/Assets.xcassets) is the
+        // monochrome mark (logo-kit.html "Меню-бар macOS": "Только
+        // монохром: macOS перекрашивает template-иконку сам") — isTemplate
+        // makes AppKit repaint it for light/dark menu bars. Falls back to
+        // the SF Symbol when the asset catalog isn't reachable (e.g. a test
+        // bundle without the app's bundled resources).
+        let image = NSImage(named: "ManaMarkTemplate")
+            ?? NSImage(systemSymbolName: "drop.fill", accessibilityDescription: "Mana")
+        image?.isTemplate = true
+        image?.accessibilityDescription = "Mana"
+        image?.size = NSSize(width: 18, height: 18)
+        statusItemImage = image
+        button.image = image
     }
 
     private func configureMenu() {

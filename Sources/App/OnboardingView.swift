@@ -28,12 +28,7 @@ struct OnboardingView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Welcome to Mana").font(.title2).bold()
-                    Text("Two quick things, then you're set.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
+                titleRow
 
                 accessibilitySection
                 Divider()
@@ -56,6 +51,29 @@ struct OnboardingView: View {
         .task {
             accessibility.startPollingIfNeeded()
             await refreshCredentialStatus()
+        }
+    }
+
+    // MARK: - Title (logo-kit.html: mark used sparingly inside the product,
+    // never on the panel/rings — those carry the per-service logos instead)
+
+    /// The mark next to the onboarding title — the one deliberate,
+    /// restrained in-app appearance of the Mana brand mark (ТЗ §1.1: the app
+    /// stays a utility, so this is the only header treated this way).
+    /// `ManaMark` is the full-color asset (Assets.xcassets), gap to the
+    /// wordmark kept close to the kit's "gap = height of lowercase a" rule.
+    private var titleRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image("ManaMark")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Welcome to Mana").font(.title2).bold()
+                Text("Two quick things, then you're set.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

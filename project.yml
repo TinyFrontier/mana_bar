@@ -64,6 +64,11 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_EMIT_LOC_STRINGS: NO
         COMBINE_HIDPI_IMAGES: YES
+        # AppIcon.appiconset lives in Sources/Resources/Assets.xcassets
+        # (Mana mark, logo-kit.html "Иконка приложения и фавикон"). actool
+        # compiles it to AppIcon.icns and merges CFBundleIconName into the
+        # final Info.plist even though GENERATE_INFOPLIST_FILE is NO above.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
   ManaTests:
     type: bundle.unit-test

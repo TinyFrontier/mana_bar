@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <title>Mana</title>
+  <!--
+    Monochrome / template variant: the whole mark resolves to a single
+    currentColor so it survives macOS template-image tinting (which keeps
+    only the alpha channel and discards RGB, e.g. the menu-bar status item).
+    The gauge "track" vs. "filled arc" distinction, normally carried by the
+    gradient, is preserved here via opacity (0.28 track / full-opacity arc)
+    instead of color — logo-kit.html, "Меню-бар macOS" panel.
+  -->
+  <circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" stroke-width="10" opacity="0.28"/>
+  <circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" stroke-width="10" stroke-linecap="round" stroke-dasharray="140 99" transform="rotate(-90 50 50)"/>
+  <circle cx="50" cy="50" r="15" fill="currentColor"/>
+</svg>
