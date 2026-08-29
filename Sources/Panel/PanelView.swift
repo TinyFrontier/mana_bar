@@ -88,7 +88,8 @@ struct PanelView: View {
                     edge: edge,
                     onErrorAction: { model.requestManualRefresh() },
                     isRefreshing: model.refreshingServiceIDs.contains(hoveredServiceID),
-                    cooldownUntil: model.cooldownUntil[hoveredServiceID]
+                    cooldownUntil: model.cooldownUntil[hoveredServiceID],
+                    timedOut: model.timedOutServiceIDs.contains(hoveredServiceID)
                 )
                     .offset(
                         x: cardOffsetX,
@@ -133,6 +134,7 @@ struct PanelView: View {
                     serviceID: serviceID,
                     status: model.status(for: serviceID),
                     thresholds: thresholds,
+                    timedOut: model.timedOutServiceIDs.contains(serviceID),
                     showPercent: settings.showPercentUnderRings,
                     isRefreshing: model.refreshingServiceIDs.contains(serviceID)
                 )

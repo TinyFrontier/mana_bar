@@ -51,6 +51,15 @@ struct DetailCardView: View {
     /// `PanelModel.cooldownUntil[serviceID]`, threaded in by `PanelView` —
     /// only meaningful for `.rateLimited`, see `errorSection`.
     var cooldownUntil: Date? = nil
+    /// `PanelModel.timedOutServiceIDs.contains(serviceID)`, threaded in by
+    /// `PanelView` — picks the honest wording for `.connectionFailed`
+    /// (see `UsageErrorCopy`).
+    var timedOut: Bool = false
+
+    private var errorText: String {
+        guard let error = status.error else { return "" }
+        return UsageErrorCopy.text(for: error, timedOut: timedOut)
+    }
 
     private let cardWidth: CGFloat = 300
 
@@ -77,8 +86,8 @@ struct DetailCardView: View {
                 // line — never the full button/hint block, which is only for
                 // "no data at all" (ТЗ §4.3).
                 dataSection(usage: usage)
-                if let error = status.error {
-                    staleWarningRow(error)
+                if status.error != nil {
+                    staleWarningRow(errorText)
                 }
             } else if isErrorState {
                 errorSection
@@ -225,12 +234,12 @@ struct DetailCardView: View {
     /// small faint text, single line — the numbers above are still the
     /// primary content (ТЗ §4.3: "серое кольцо + текст ошибки, но цифры
     /// остаются видны").
-    private func staleWarningRow(_ error: UsageError) -> some View {
+    private func staleWarningRow(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(ManaColor.textVeryFaint)
-            Text(error.userDescription)
+            Text(text)
                 .font(.system(size: 11))
                 .lineSpacing(11 * 0.4)
                 .foregroundStyle(ManaColor.textVeryFaint)
@@ -253,7 +262,7 @@ struct DetailCardView: View {
     @ViewBuilder
     private var errorSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(status.error?.userDescription ?? "")
+            Text(errorText)
                 .font(.system(size: 13))
                 .lineSpacing(13 * 0.45)
                 .foregroundStyle(ManaColor.textFaint)

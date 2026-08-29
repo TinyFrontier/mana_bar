@@ -115,6 +115,108 @@ extension ResetFormatter {
     }
 }
 
+/// What one `RingView` should draw for a given `ServiceStatus` — extracted
+/// from the view so the decision is unit-testable without rendering SwiftUI
+/// (design-spec.md §3.2–§3.5, plus the stale-ring fix below).
+///
+/// The fix: `.stale` used to be lumped in with `.unavailable` under a single
+/// "is there an error?" test, so a service whose last fetch failed dropped to
+/// an empty gray ring labelled "—" even though the panel was still holding
+/// perfectly good numbers (the detail card showed them the whole time — only
+/// the ring pretended there was nothing). `.stale` now keeps its last known
+/// fill and percent label, rendered in the muted style, and keeps the yellow
+/// "!" badge to say the number is not fresh. `.unavailable` (no data at all)
+/// and `.loading` are unchanged.
+struct RingPresentation: Equatable {
+    /// Colored progress stroke, 0...1. Zero means "draw only the faint base
+    /// ring" — there is no number to show.
+    var fillFraction: Double
+    /// Text under the ring: "73%" / "···" (loading) / "—" (nothing to show).
+    var label: String
+    /// Ring stroke, glyph and percent label render in the dimmed "this is not
+    /// live data" style rather than the full-strength one.
+    var isMuted: Bool
+    /// Neutral gray instead of a usage-level (green/yellow/red) color, for the
+    /// states that have no percentage behind them at all.
+    var usesNeutralColor: Bool
+    /// Yellow "!" corner badge (any error, stale or not).
+    var showsErrorBadge: Bool
+    /// Spinning partial arc — `.loading`, or any in-flight refresh the UI
+    /// should acknowledge (`PanelModel.refreshingServiceIDs`).
+    var showsSpinner: Bool
+    /// Percentage the ring color is derived from (0 when there is none).
+    var percent: Double
+
+    static func make(status: ServiceStatus, isRefreshing: Bool = false) -> RingPresentation {
+        let percent = status.usage?.sessionWindow?.usedPercent ?? 0
+        let fraction = min(max(percent / 100, 0), 1)
+        let hasError = status.error != nil
+
+        switch status {
+        case .loading:
+            return RingPresentation(
+                fillFraction: 0,
+                label: "···",
+                isMuted: true,
+                usesNeutralColor: true,
+                showsErrorBadge: false,
+                showsSpinner: true,
+                percent: 0
+            )
+        case .ready:
+            return RingPresentation(
+                fillFraction: fraction,
+                label: "\(Int(percent.rounded()))%",
+                isMuted: false,
+                usesNeutralColor: false,
+                showsErrorBadge: false,
+                showsSpinner: isRefreshing,
+                percent: percent
+            )
+        case .stale:
+            return RingPresentation(
+                fillFraction: fraction,
+                label: "\(Int(percent.rounded()))%",
+                isMuted: true,
+                usesNeutralColor: false,
+                showsErrorBadge: true,
+                showsSpinner: isRefreshing,
+                percent: percent
+            )
+        case .unavailable:
+            return RingPresentation(
+                fillFraction: 0,
+                label: "—",
+                isMuted: true,
+                usesNeutralColor: true,
+                showsErrorBadge: hasError,
+                showsSpinner: isRefreshing,
+                percent: 0
+            )
+        }
+    }
+}
+
+/// User-facing text for a `UsageError`.
+///
+/// `UsageError` is a frozen contract (`Sources/Providers/UsageProvider.swift`)
+/// and has a single `.connectionFailed` case covering two situations that feel
+/// completely different to the user: "this machine is offline" (fails in
+/// milliseconds) and "the request was still waiting when the budget ran out"
+/// (fails after the full timeout — the service, DNS or the link is slow, but
+/// the machine is online). Printing "Нет соединения" for the second one is a
+/// lie the user can disprove by loading any web page, so the coordinator
+/// reports which of the two it was (`PanelModel.timedOutServiceIDs`, set from
+/// the measured fetch duration) and this picks the honest wording.
+enum UsageErrorCopy {
+    static let timedOutDescription = "Сервис не отвечает"
+
+    static func text(for error: UsageError, timedOut: Bool) -> String {
+        if timedOut, case .connectionFailed = error { return timedOutDescription }
+        return error.userDescription
+    }
+}
+
 extension Calendar {
     /// Gregorian calendar with the locale pinned to en_US_POSIX (so weekday/
     /// month names and AM/PM always render in English) and the system's

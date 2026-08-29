@@ -26,7 +26,7 @@ struct CodexUsageClient: Sendable {
             method: "GET",
             url: Self.usageURL,
             headers: headers,
-            timeout: 10
+            timeout: ProviderTimeouts.usageRequest
         ))
     }
 
@@ -44,7 +44,7 @@ struct CodexUsageClient: Sendable {
             url: Self.refreshURL,
             headers: ["Content-Type": "application/x-www-form-urlencoded"],
             body: Data(body.utf8),
-            timeout: 15
+            timeout: ProviderTimeouts.tokenRefresh
         ))
 
         if response.statusCode == 400 || response.statusCode == 401 {

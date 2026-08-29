@@ -21,12 +21,25 @@ final class PanelModel: ObservableObject {
     /// refresh (Re-login/Retry/Grant-access button, ТЗ §4.3 live-feedback
     /// fix — those buttons used to appear to do nothing), or the very first
     /// re-verification of a disk-cache-seeded snapshot right after launch
-    /// (research doc §9 п.7). Deliberately NOT set for silent background
-    /// polls (timer/wake/force-refresh-on-show), which stay invisible by
+    /// (research doc §9 п.7), or **any automatic poll that follows a failure**
+    /// — a retry of something the user can already see is broken should look
+    /// like it is happening, especially the accelerated launch retries
+    /// (`UsageCoordinatorTuning.launchRetryDelays`). Deliberately still NOT set for
+    /// silent background polls of a *healthy* service, which stay invisible by
     /// design. `RingView`/`DetailCardView` read this via
     /// `PanelView` to show a loading cue without discarding `statuses`' last
     /// -good data — set/cleared exclusively by `UsageCoordinator`.
     @Published private(set) var refreshingServiceIDs: Set<ServiceID> = []
+
+    /// Services whose most recent `.connectionFailed` was specifically a
+    /// **timeout** (the request was still waiting when its budget ran out)
+    /// rather than "this machine has no network" (which fails in
+    /// milliseconds). `UsageError` is a frozen contract with one case for
+    /// both, so the coordinator — the only writer — classifies by measured
+    /// fetch duration and records the answer here; `UsageErrorCopy` turns it
+    /// into the honest wording ("Сервис не отвечает" vs "Нет соединения").
+    /// Cleared on any success or any other kind of failure.
+    @Published private(set) var timedOutServiceIDs: Set<ServiceID> = []
 
     /// Wall-clock deadline of an active `.rateLimited` cooldown, when known —
     /// `UsageCoordinator` is the only writer (`recordFailure`/`recordSuccess`).
@@ -83,6 +96,16 @@ final class PanelModel: ObservableObject {
             refreshingServiceIDs.insert(id)
         } else {
             refreshingServiceIDs.remove(id)
+        }
+    }
+
+    /// Marks/unmarks `id`'s current `.connectionFailed` as a timeout rather
+    /// than an offline machine (see `timedOutServiceIDs` doc). Idempotent.
+    func setTimedOut(_ timedOut: Bool, for id: ServiceID) {
+        if timedOut {
+            timedOutServiceIDs.insert(id)
+        } else {
+            timedOutServiceIDs.remove(id)
         }
     }
 

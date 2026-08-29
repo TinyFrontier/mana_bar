@@ -6,14 +6,19 @@ import SwiftUI
 ///
 /// Geometry mirrors the HTML prototype 1:1: 38×38 frame, r=16.6/stroke 2.8
 /// progress ring around a r=13.5 `#2c2c2e` center disc. Ring color reflects
-/// usage level (green/yellow/red via `UsageLevel`, gray on error/loading);
-/// error state additionally shows the yellow "!" badge, loading shows a
-/// spinning partial arc instead of the progress fill. Hover tracking that
-/// drives `DetailCardView` is owned by the parent `PanelView`.
+/// usage level (green/yellow/red via `UsageLevel`, gray when there is no
+/// number to show); an error additionally shows the yellow "!" badge, loading
+/// shows a spinning partial arc instead of the progress fill. A `.stale` ring
+/// keeps its last known fill and percent, dimmed — see `RingPresentation`,
+/// which owns every one of those decisions. Hover tracking that drives
+/// `DetailCardView` is owned by the parent `PanelView`.
 struct RingView: View {
     let serviceID: ServiceID
     let status: ServiceStatus
     var thresholds: UsageThresholds = .default
+    /// `PanelModel.timedOutServiceIDs.contains(serviceID)` — only affects the
+    /// accessibility label's wording (see `UsageErrorCopy`).
+    var timedOut: Bool = false
     /// ТЗ §6 "показывать проценты под кольцами" — when `false`, the percent
     /// label under the ring is omitted entirely (not just dimmed).
     var showPercent: Bool = true
@@ -33,43 +38,37 @@ struct RingView: View {
 
     @State private var spinnerRotation = false
 
-    private var isLoading: Bool {
-        if case .loading = status { return true }
-        return false
+    /// Every "what should this ring show" decision lives in the pure,
+    /// unit-tested `RingPresentation`; this view only turns it into pixels.
+    private var presentation: RingPresentation {
+        RingPresentation.make(status: status, isRefreshing: isRefreshing)
     }
 
-    private var isError: Bool { status.error != nil }
-
-    private var sessionPercent: Double {
-        status.usage?.sessionWindow?.usedPercent ?? 0
-    }
-
-    /// design-spec.md §6.4: dash offset collapses to 0 fill on error/loading
-    /// (the colored stroke is fully hidden, leaving only the faint base ring).
-    private var fraction: Double {
-        guard !isError, !isLoading else { return 0 }
-        return min(max(sessionPercent / 100, 0), 1)
-    }
+    /// design-spec.md §6.4: the colored stroke collapses to 0 fill when there
+    /// is no number behind it (loading / no data at all), leaving only the
+    /// faint base ring. A `.stale` ring keeps its last known fill.
+    private var fraction: Double { presentation.fillFraction }
 
     private var ringColor: Color {
-        if isError || isLoading { return ManaColor.unavailable }
-        return UsageLevel.forPercent(sessionPercent, thresholds: thresholds).color
+        let presentation = presentation
+        if presentation.usesNeutralColor { return ManaColor.unavailable }
+        let base = UsageLevel.forPercent(presentation.percent, thresholds: thresholds).color
+        // `.stale`: same level color, dimmed — the number is real but no
+        // longer live, and flattening it to gray threw away information the
+        // panel actually had (the detail card kept showing it).
+        return presentation.isMuted ? base.opacity(ManaColor.staleFillOpacity) : base
     }
 
     private var glyphColor: Color {
-        (isError || isLoading) ? ManaColor.glyphDimmed : ManaColor.textPrimary
+        presentation.isMuted ? ManaColor.glyphDimmed : ManaColor.textPrimary
     }
 
     private var percentColor: Color {
-        (isError || isLoading) ? ManaColor.percentDimmed : ManaColor.textPrimary
+        presentation.isMuted ? ManaColor.percentDimmed : ManaColor.textPrimary
     }
 
-    /// design-spec.md §3.4: "21%" / "···" (loading) / "—" (error).
-    private var percentLabel: String {
-        if isError { return "—" }
-        if isLoading { return "···" }
-        return "\(Int(sessionPercent.rounded()))%"
-    }
+    /// design-spec.md §3.4: "21%" / "···" (loading) / "—" (no data).
+    private var percentLabel: String { presentation.label }
 
     var body: some View {
         VStack(spacing: 3) {
@@ -90,11 +89,11 @@ struct RingView: View {
                     .animation(.easeInOut(duration: 0.32), value: fraction)
                     .animation(.easeInOut(duration: 0.2), value: ringColor)
 
-                if isLoading || isRefreshing {
+                if presentation.showsSpinner {
                     // design-spec.md §6.5: dasharray "24 81" ≈ 22.9% of the
                     // circumference visible, spinning 360° every 0.9s linear.
                     // Also played (unlike the dash-offset collapse above,
-                    // which stays gated on `isError`/`isLoading` only) while
+                    // which stays gated on "is there a number at all") while
                     // `isRefreshing` — over a `.stale` ring's real percent/
                     // color, not just the plain `.loading` gray one.
                     Circle()
@@ -112,7 +111,7 @@ struct RingView: View {
             }
             .frame(width: frameSize, height: frameSize)
             .overlay(alignment: .bottomTrailing) {
-                if isError {
+                if presentation.showsErrorBadge {
                     ErrorBadge().offset(x: 2, y: 2)
                 }
             }
@@ -127,7 +126,25 @@ struct RingView: View {
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(serviceID.displayName) \(isError ? status.error?.userDescription ?? "error" : isLoading ? "loading" : "\(Int(sessionPercent.rounded()))% used")")
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    /// `.stale` announces both halves ("73% used, <error>") now that the ring
+    /// visibly shows both; `.unavailable` announces only the error, `.loading`
+    /// only "loading".
+    private var accessibilityLabel: String {
+        var parts = [serviceID.displayName]
+        if case .loading = status {
+            parts.append("loading")
+        } else {
+            if status.usage != nil {
+                parts.append("\(Int(presentation.percent.rounded()))% used")
+            }
+            if let error = status.error {
+                parts.append(UsageErrorCopy.text(for: error, timedOut: timedOut))
+            }
+        }
+        return parts.joined(separator: " ")
     }
 }
 

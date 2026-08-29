@@ -26,7 +26,7 @@ struct ClaudeUsageClient: Sendable {
                 "Content-Type": "application/json",
                 "anthropic-beta": "oauth-2025-04-20",
             ],
-            timeout: 10
+            timeout: ProviderTimeouts.usageRequest
         ))
     }
 
@@ -49,7 +49,7 @@ struct ClaudeUsageClient: Sendable {
             url: Self.refreshURL,
             headers: ["Content-Type": "application/json"],
             body: body,
-            timeout: 15
+            timeout: ProviderTimeouts.tokenRefresh
         ))
 
         if response.statusCode == 400 || response.statusCode == 401 {

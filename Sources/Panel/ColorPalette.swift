@@ -25,6 +25,12 @@ enum ManaColor {
     static let glyphDimmed = Color.white.opacity(0.45)
     static let percentDimmed = Color.white.opacity(0.4)
 
+    /// Opacity applied to a `.stale` ring's usage-level color (see
+    /// `RingPresentation`): the last known percentage is still worth showing,
+    /// but must read as "not live" next to a `.ready` ring — matching how the
+    /// dimmed glyph/percent already read at ~0.4–0.45.
+    static let staleFillOpacity: Double = 0.45
+
     static let exhaustedText = Color(red: 0xff / 255, green: 0x9f / 255, blue: 0x8f / 255)
     static let separator = Color.white.opacity(0.1)
 

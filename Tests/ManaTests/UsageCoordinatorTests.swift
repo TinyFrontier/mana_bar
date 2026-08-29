@@ -109,6 +109,15 @@ final class GatedUsageProvider: UsageProvider, @unchecked Sendable {
         return try result.get()
     }
 
+    /// Whether a `fetchUsage()` is currently suspended waiting for
+    /// `resume(with:)` — lets a test synchronize on "the coordinator has
+    /// genuinely started this fetch" without depending on any UI flag.
+    var hasPendingFetch: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return continuation != nil
+    }
+
     /// Releases the pending (or, if called first, the next) `fetchUsage()`.
     func resume(with result: Result<ServiceUsage, UsageError>) {
         lock.lock()
@@ -118,6 +127,29 @@ final class GatedUsageProvider: UsageProvider, @unchecked Sendable {
             continuation.resume(returning: result)
         } else {
             pendingResult = result
+            lock.unlock()
+        }
+    }
+}
+
+/// Captures what `UsageCoordinator` asks to be scheduled later (the
+/// launch-phase accelerated retries) instead of actually waiting: the test
+/// asserts the recorded delays and then drives `handleLaunchRetry(_:)`
+/// itself, so a 15s → 30s → 60s backoff is verified in microseconds.
+final class RecordingScheduler: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [TimeInterval] = []
+
+    var delays: [TimeInterval] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recorded
+    }
+
+    var schedule: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void {
+        { [self] delay, _ in
+            lock.lock()
+            recorded.append(delay)
             lock.unlock()
         }
     }
@@ -142,6 +174,11 @@ final class UsageCoordinatorTests: XCTestCase {
         forceRefreshStaleness: TimeInterval = 60,
         fixedCooldown: TimeInterval = 60,
         fetchTimeout: TimeInterval = 999_999,
+        // Off by default: every pre-existing test here is about the
+        // steady-state cooldown, not the launch-phase acceleration, which has
+        // its own section below and opts in explicitly.
+        launchRetryDelays: [TimeInterval] = [],
+        scheduler: RecordingScheduler? = nil,
         snapshotCache: UsageSnapshotCache? = nil
     ) -> (UsageCoordinator, PanelModel) {
         let model = PanelModel(serviceOrder: [.claude, .chatgpt], statuses: [:])
@@ -157,8 +194,10 @@ final class UsageCoordinatorTests: XCTestCase {
             fixedCooldown: fixedCooldown,
             observesWake: false,
             fetchTimeout: fetchTimeout,
+            launchRetryDelays: launchRetryDelays,
             snapshotCache: snapshotCache,
-            now: clock.now
+            now: clock.now,
+            scheduleAfter: scheduler?.schedule ?? { _, _ in }
         )
         return (coordinator, model)
     }
@@ -687,5 +726,312 @@ final class UsageCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(model.status(for: .claude), .stale(cachedUsage, .connectionFailed))
         XCTAssertFalse(model.refreshingServiceIDs.contains(.claude))
+    }
+
+    // MARK: - Launch-phase accelerated retry
+    //
+    // Live-feedback bug: on the reporter's first launch both providers failed
+    // (a cold TLS setup on a briefly degraded link blew the request budget)
+    // and the panel then sat on gray "Нет соединения" rings for a full two
+    // minutes — 60s post-failure cooldown, then the 2-minute poll timer —
+    // even though the network was healthy seconds later.
+
+    func testProductionLaunchRetryBackoffIsFifteenThirtySixty() {
+        XCTAssertEqual(UsageCoordinatorTuning.launchRetryDelays, [15, 30, 60])
+    }
+
+    func testTransientLaunchFailureSchedulesBackoffAndStopsAfterThreeAttempts() async {
+        let clock = TestClock()
+        let scheduler = RecordingScheduler()
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [.failure(.connectionFailed)])
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.success(usage(.chatgpt, refreshedAt: clock.now()))])
+        let (coordinator, _) = makeCoordinator(
+            claude: claude,
+            chatgpt: chatgpt,
+            clock: clock,
+            launchRetryDelays: UsageCoordinatorTuning.launchRetryDelays,
+            scheduler: scheduler
+        )
+
+        await coordinator.performLaunchPoll()
+        XCTAssertEqual(scheduler.delays, [15], "the first launch failure must schedule a retry, not wait out the poll timer")
+
+        // Each accelerated retry that fails again backs off one step.
+        claude.enqueue(.failure(.connectionFailed))
+        clock.advance(by: 15)
+        await coordinator.handleLaunchRetry(.claude)
+        XCTAssertEqual(claude.fetchCount, 2, "the scheduled retry must actually re-fetch")
+        XCTAssertEqual(scheduler.delays, [15, 30])
+
+        claude.enqueue(.failure(.connectionFailed))
+        clock.advance(by: 30)
+        await coordinator.handleLaunchRetry(.claude)
+        XCTAssertEqual(claude.fetchCount, 3)
+        XCTAssertEqual(scheduler.delays, [15, 30, 60])
+
+        // Backoff exhausted: this service falls back to the ordinary
+        // cooldown + poll-timer rhythm rather than retrying forever.
+        claude.enqueue(.failure(.connectionFailed))
+        clock.advance(by: 60)
+        await coordinator.handleLaunchRetry(.claude)
+        XCTAssertEqual(claude.fetchCount, 4)
+        XCTAssertEqual(scheduler.delays, [15, 30, 60], "the backoff must stop after three accelerated attempts")
+
+        // The successful service never entered the launch phase at all.
+        XCTAssertEqual(chatgpt.fetchCount, 1)
+    }
+
+    func testLaunchRetryRecoversAndStopsRetryingAfterSuccess() async {
+        let clock = TestClock()
+        let scheduler = RecordingScheduler()
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [.failure(.connectionFailed)])
+        // Succeeds at launch, so it leaves the launch phase immediately and
+        // can never contribute entries to the shared delay recorder.
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.success(usage(.chatgpt, refreshedAt: clock.now()))])
+        let (coordinator, model) = makeCoordinator(
+            claude: claude,
+            chatgpt: chatgpt,
+            clock: clock,
+            launchRetryDelays: UsageCoordinatorTuning.launchRetryDelays,
+            scheduler: scheduler
+        )
+
+        await coordinator.performLaunchPoll()
+        XCTAssertEqual(model.status(for: .claude), .unavailable(.connectionFailed))
+        XCTAssertEqual(scheduler.delays, [15])
+
+        clock.advance(by: 15)
+        let recovered = usage(.claude, refreshedAt: clock.now(), percent: 31)
+        claude.enqueue(.success(recovered))
+        await coordinator.handleLaunchRetry(.claude)
+
+        XCTAssertEqual(model.status(for: .claude), .ready(recovered), "the accelerated retry is what makes the panel recover in seconds")
+        XCTAssertEqual(scheduler.delays, [15], "a recovered service must not schedule further accelerated retries")
+
+        // Past the launch phase now: a later failure goes back to the plain
+        // 60s cooldown, no acceleration.
+        claude.enqueue(.failure(.connectionFailed))
+        clock.advance(by: 61)
+        await coordinator.handleTimerTick()
+        XCTAssertEqual(model.status(for: .claude), .stale(recovered, .connectionFailed))
+        XCTAssertEqual(scheduler.delays, [15], "acceleration is a launch-phase-only concession")
+    }
+
+    /// Errors a retry seconds later cannot possibly fix must not be
+    /// accelerated: no login appears in 15s, and a rate limit must be waited
+    /// out at the interval the service asked for (research doc §9 п.4).
+    func testNonTransientLaunchFailuresAreNotAccelerated() async {
+        for error in [UsageError.notLoggedIn, .keychainAccessDenied, .sessionExpired, .missingScope, .rateLimited(retryAfter: 300), .decodingFailed("x")] {
+            let clock = TestClock()
+            let scheduler = RecordingScheduler()
+            let claude = FakeUsageProvider(serviceID: .claude, queued: [.failure(error)])
+            let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.success(usage(.chatgpt, refreshedAt: clock.now()))])
+            let (coordinator, _) = makeCoordinator(
+                claude: claude,
+                chatgpt: chatgpt,
+                clock: clock,
+                launchRetryDelays: UsageCoordinatorTuning.launchRetryDelays,
+                scheduler: scheduler
+            )
+
+            await coordinator.performLaunchPoll()
+            XCTAssertEqual(scheduler.delays, [], "\(error) must not trigger an accelerated retry")
+        }
+    }
+
+    func testLaunchRetryComingDueWhilePausedIsDropped() async {
+        let clock = TestClock()
+        let scheduler = RecordingScheduler()
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [.failure(.connectionFailed)])
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.failure(.notLoggedIn)])
+        let (coordinator, _) = makeCoordinator(
+            claude: claude,
+            chatgpt: chatgpt,
+            clock: clock,
+            launchRetryDelays: UsageCoordinatorTuning.launchRetryDelays,
+            scheduler: scheduler
+        )
+
+        await coordinator.performLaunchPoll()
+        XCTAssertEqual(claude.fetchCount, 1)
+
+        coordinator.pause()
+        clock.advance(by: 15)
+        await coordinator.handleLaunchRetry(.claude)
+
+        XCTAssertEqual(claude.fetchCount, 1, "a paused coordinator must not poll (ТЗ §7)")
+    }
+
+    // MARK: - Timeout vs. offline (`PanelModel.timedOutServiceIDs`)
+
+    /// `UsageError` is frozen and has a single `.connectionFailed` for both
+    /// "offline" (fails in milliseconds) and "ran out of time" (burns the
+    /// whole budget). The coordinator classifies by measured duration so the
+    /// card can say "Сервис не отвечает" instead of the disprovable
+    /// "Нет соединения".
+    func testSlowConnectionFailureIsReportedAsATimeout() async {
+        let clock = TestClock()
+        let claude = GatedUsageProvider(serviceID: .claude)
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.failure(.connectionFailed)])
+        let model = PanelModel(serviceOrder: [.claude, .chatgpt], statuses: [:])
+        let coordinator = UsageCoordinator(
+            model: model,
+            providers: [
+                .claude: UsageCoordinator.ProviderPair(claude),
+                .chatgpt: UsageCoordinator.ProviderPair(chatgpt),
+            ],
+            pollInterval: 999_999,
+            observesWake: false,
+            fetchTimeout: 999_999,
+            launchRetryDelays: [],
+            now: clock.now,
+            scheduleAfter: { _, _ in }
+        )
+
+        let tick = Task { await coordinator.handleTimerTick() }
+        await waitUntil { model.refreshingServiceIDs.contains(.claude) || claude.hasPendingFetch }
+        // The fetch spent its whole budget before failing.
+        clock.advance(by: UsageCoordinatorTuning.timeoutClassificationThreshold)
+        claude.resume(with: .failure(.connectionFailed))
+        await tick.value
+
+        XCTAssertTrue(model.timedOutServiceIDs.contains(.claude), "a connection failure that burned the budget is a timeout")
+        XCTAssertEqual(
+            UsageErrorCopy.text(for: .connectionFailed, timedOut: model.timedOutServiceIDs.contains(.claude)),
+            "Сервис не отвечает"
+        )
+    }
+
+    /// The other half: an *instant* connection failure is a genuinely offline
+    /// machine and must keep saying "Нет соединения".
+    func testInstantConnectionFailureIsNotReportedAsATimeout() async {
+        let clock = TestClock()
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [.failure(.connectionFailed)])
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.failure(.connectionFailed)])
+        let (coordinator, model) = makeCoordinator(claude: claude, chatgpt: chatgpt, clock: clock)
+
+        // The clock never moves, so both fetches took zero time.
+        await coordinator.handleTimerTick()
+
+        XCTAssertTrue(model.timedOutServiceIDs.isEmpty)
+        XCTAssertEqual(
+            UsageErrorCopy.text(for: .connectionFailed, timedOut: model.timedOutServiceIDs.contains(.claude)),
+            UsageError.connectionFailed.userDescription
+        )
+    }
+
+    func testCoordinatorFetchTimeoutIsReportedAsATimeout() async {
+        let clock = TestClock()
+        let claude = FakeUsageProvider(serviceID: .claude, hangsForever: true)
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.success(usage(.chatgpt, refreshedAt: clock.now()))])
+        let (coordinator, model) = makeCoordinator(
+            claude: claude,
+            chatgpt: chatgpt,
+            clock: clock,
+            fetchTimeout: 0.2
+        )
+
+        // The coordinator's own backstop fires after the (test) clock has been
+        // pushed past the classification threshold by the hang.
+        let tick = Task { await coordinator.handleTimerTick() }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        clock.advance(by: 30)
+        await tick.value
+
+        XCTAssertEqual(model.status(for: .claude), .unavailable(.connectionFailed))
+        XCTAssertTrue(model.timedOutServiceIDs.contains(.claude), "the fetch-timeout backstop is a timeout by construction")
+    }
+
+    func testSuccessClearsTheTimedOutFlag() async {
+        let clock = TestClock()
+        let claude = GatedUsageProvider(serviceID: .claude)
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.failure(.notLoggedIn)])
+        let model = PanelModel(serviceOrder: [.claude, .chatgpt], statuses: [:])
+        model.setTimedOut(true, for: .claude)
+        let coordinator = UsageCoordinator(
+            model: model,
+            providers: [
+                .claude: UsageCoordinator.ProviderPair(claude),
+                .chatgpt: UsageCoordinator.ProviderPair(chatgpt),
+            ],
+            pollInterval: 999_999,
+            observesWake: false,
+            fetchTimeout: 999_999,
+            launchRetryDelays: [],
+            now: clock.now,
+            scheduleAfter: { _, _ in }
+        )
+
+        let fresh = usage(.claude, refreshedAt: clock.now(), percent: 3)
+        claude.resume(with: .success(fresh))
+        await coordinator.handleTimerTick()
+
+        XCTAssertEqual(model.status(for: .claude), .ready(fresh))
+        XCTAssertFalse(model.timedOutServiceIDs.contains(.claude))
+    }
+
+    // MARK: - Automatic retries after an error are visible
+
+    /// The accelerated launch retries would otherwise be invisible: the panel
+    /// would just sit on a gray ring looking stuck. Any automatic poll that
+    /// follows a failure now flags `refreshingServiceIDs`, exactly like a
+    /// manual refresh does — while still leaving silent polls of a *healthy*
+    /// service invisible.
+    func testAutomaticRetryAfterErrorShowsTheRefreshingCue() async {
+        let clock = TestClock()
+        let claude = FakeUsageProvider(serviceID: .claude, queued: [.failure(.connectionFailed)])
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.failure(.notLoggedIn)])
+        let (coordinator, model) = makeCoordinator(
+            claude: claude,
+            chatgpt: chatgpt,
+            clock: clock,
+            fixedCooldown: 0,
+            fetchTimeout: 0.2
+        )
+
+        await coordinator.handleTimerTick()
+        XCTAssertEqual(model.status(for: .claude), .unavailable(.connectionFailed))
+        XCTAssertFalse(model.refreshingServiceIDs.contains(.claude), "the cue must clear once a fetch resolves")
+
+        // Next automatic poll of the now-failed service: the cue is visible
+        // for the whole round trip (the hang is bounded by `fetchTimeout`).
+        claude.hangsForever = true
+        let tick = Task { await coordinator.handleTimerTick() }
+        await waitUntil { model.refreshingServiceIDs.contains(.claude) }
+        XCTAssertTrue(model.refreshingServiceIDs.contains(.claude))
+
+        await tick.value
+        XCTAssertFalse(model.refreshingServiceIDs.contains(.claude), "the cue must clear again once the retry resolves")
+    }
+
+    func testSilentPollOfAHealthyServiceStaysInvisible() async {
+        let clock = TestClock()
+        let claude = GatedUsageProvider(serviceID: .claude)
+        let chatgpt = FakeUsageProvider(serviceID: .chatgpt, queued: [.failure(.notLoggedIn)])
+        let model = PanelModel(serviceOrder: [.claude, .chatgpt], statuses: [:])
+        model.setStatus(.ready(usage(.claude, refreshedAt: clock.now(), percent: 20)), for: .claude)
+        let coordinator = UsageCoordinator(
+            model: model,
+            providers: [
+                .claude: UsageCoordinator.ProviderPair(claude),
+                .chatgpt: UsageCoordinator.ProviderPair(chatgpt),
+            ],
+            pollInterval: 999_999,
+            observesWake: false,
+            fetchTimeout: 999_999,
+            launchRetryDelays: [],
+            now: clock.now,
+            scheduleAfter: { _, _ in }
+        )
+
+        let tick = Task { await coordinator.handleTimerTick() }
+        await waitUntil { claude.hasPendingFetch }
+        XCTAssertFalse(
+            model.refreshingServiceIDs.contains(.claude),
+            "a background poll of a healthy service must stay invisible (ТЗ §4.3)"
+        )
+
+        claude.resume(with: .success(usage(.claude, refreshedAt: clock.now(), percent: 21)))
+        await tick.value
     }
 }
