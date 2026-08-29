@@ -24,19 +24,9 @@ final class PanelWindow: NSPanel {
     /// completed yet — i.e. the window is on (or animating onto) screen.
     private(set) var isShown = false
 
-    private var contentSize: NSSize {
-        NSSize(
-            width: PanelLayoutMetrics.containerWidth(),
-            height: PanelLayoutMetrics.containerHeight(serviceCount: model.serviceOrder.count)
-        )
-    }
-
     init(model: PanelModel) {
         self.model = model
-        let size = NSSize(
-            width: PanelLayoutMetrics.containerWidth(),
-            height: PanelLayoutMetrics.containerHeight(serviceCount: model.serviceOrder.count)
-        )
+        let size = PanelLayoutMetrics.containerSize(serviceCount: model.serviceOrder.count)
 
         super.init(
             contentRect: NSRect(origin: .zero, size: size),
@@ -72,54 +62,46 @@ final class PanelWindow: NSPanel {
         fatalError("init(coder:) is not supported")
     }
 
+    /// AppKit's default implementation keeps a window's title bar on screen,
+    /// which for this borderless container means silently nudging the frame
+    /// we just computed — the off-screen "hidden" frame sits entirely past the
+    /// edge, and the `.top` docked frame intentionally overhangs the screen's
+    /// top (the container is much taller than the island it centers). Both are
+    /// deliberate, so the computed frame is taken verbatim and
+    /// `PanelLayoutMetrics.dockedFrame` stays the single source of truth.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
+
     // MARK: - Frame math
 
+    /// Screen edge the window docks to. TODO: honor `AppSettings.panelEdge`
+    /// for a real left edge — see `SettingsView`, disabled there as "coming
+    /// soon". `PanelView` pins the island to the container's *trailing* edge,
+    /// so docking stays right-only until that view learns to flip, and that
+    /// control's disabled state stays honest.
+    private var dockEdge: PanelEdge { .right }
+
     private func hiddenFrame(on screen: NSScreen) -> NSRect {
-        let size = contentSize
-        return NSRect(
-            x: screen.frame.maxX,
-            y: dockedY(on: screen, size: size),
-            width: size.width,
-            height: size.height
+        PanelLayoutMetrics.offscreenFrame(
+            screenFrame: screen.frame,
+            serviceCount: model.serviceOrder.count,
+            verticalPosition: AppSettings.shared.verticalPosition,
+            edge: dockEdge
         )
     }
 
-    /// Docked frame: right-aligned to the edge (ТЗ §3.2 — panel prижата к
-    /// краю), vertically positioned per `AppSettings.verticalPosition`
-    /// (ТЗ §3.1, §6). TODO: honor `AppSettings.panelEdge` for a real left
-    /// edge — see `SettingsView`, disabled there as "coming soon"; docking
-    /// stays right-only here so that control's disabled state is honest.
+    /// Docked frame: flush against the screen edge (ТЗ §3.2 — панель прижата
+    /// к краю), vertically positioned per `AppSettings.verticalPosition`
+    /// (ТЗ §3.1, §6). All of the math lives in `PanelLayoutMetrics
+    /// .dockedFrame`, which is pure and unit-tested (`PanelFrameTests`).
     private func shownFrame(on screen: NSScreen) -> NSRect {
-        let size = contentSize
-        return NSRect(
-            x: screen.frame.maxX - size.width,
-            y: dockedY(on: screen, size: size),
-            width: size.width,
-            height: size.height
+        PanelLayoutMetrics.dockedFrame(
+            screenFrame: screen.frame,
+            serviceCount: model.serviceOrder.count,
+            verticalPosition: AppSettings.shared.verticalPosition,
+            edge: dockEdge
         )
-    }
-
-    /// Vertical origin of the window's content frame for the current
-    /// `AppSettings.verticalPosition` (ТЗ §6). The window's own content
-    /// height (`size.height`) is much taller than the visible island (extra
-    /// space is reserved for the detail-card flyout, see
-    /// `PanelLayoutMetrics.containerHeight`), and `PanelView` always centers
-    /// the island vertically within that container — so `.top`/`.bottom`
-    /// target where the *island* (not the oversized container) should sit,
-    /// then back out the container's origin from that.
-    private func dockedY(on screen: NSScreen, size: NSSize) -> CGFloat {
-        let islandHeight = PanelLayoutMetrics.panelHeight(serviceCount: model.serviceOrder.count)
-        let margin = PanelLayoutMetrics.verticalEdgeMargin
-        switch AppSettings.shared.verticalPosition {
-        case .center:
-            return screen.frame.midY - size.height / 2
-        case .top:
-            let islandCenterY = screen.frame.maxY - margin - islandHeight / 2
-            return islandCenterY - size.height / 2
-        case .bottom:
-            let islandCenterY = screen.frame.minY + margin + islandHeight / 2
-            return islandCenterY - size.height / 2
-        }
     }
 
     // design-spec.md §6.1/§6.2: 230ms, cubic-bezier(0.22, 0.7, 0.3, 1), both directions.

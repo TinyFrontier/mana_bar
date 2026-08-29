@@ -59,4 +59,100 @@ enum PanelLayoutMetrics {
         let neededForCard = cardMaxHeight + 2 * maxRingOffset
         return max(panel, neededForCard) + 40
     }
+
+    static func containerSize(serviceCount: Int) -> CGSize {
+        CGSize(width: containerWidth(), height: containerHeight(serviceCount: serviceCount))
+    }
+
+    // MARK: - Window frame math (pure; used by `PanelWindow`)
+
+    /// Vertical origin of the *container* frame for a given vertical
+    /// placement (ТЗ §6).
+    ///
+    /// The container is much taller than the visible island (extra space is
+    /// reserved for the detail-card flyout, see `containerHeight`) and
+    /// `PanelView` always centers the island vertically inside it — so
+    /// `.top`/`.bottom` describe where the **island** should sit, and the
+    /// container origin is backed out from that.
+    static func dockedOriginY(
+        screenFrame: CGRect,
+        serviceCount: Int,
+        verticalPosition: PanelVerticalPosition,
+        margin: CGFloat = verticalEdgeMargin
+    ) -> CGFloat {
+        let containerHeight = containerHeight(serviceCount: serviceCount)
+        let islandHeight = panelHeight(serviceCount: serviceCount)
+        switch verticalPosition {
+        case .center:
+            return screenFrame.midY - containerHeight / 2
+        case .top:
+            let islandCenterY = screenFrame.maxY - margin - islandHeight / 2
+            return islandCenterY - containerHeight / 2
+        case .bottom:
+            let islandCenterY = screenFrame.minY + margin + islandHeight / 2
+            return islandCenterY - containerHeight / 2
+        }
+    }
+
+    /// Docked (fully visible) window frame, flush against the chosen screen
+    /// edge (ТЗ §3.2 — "панель прижата к краю").
+    ///
+    /// Deliberately keyed off the screen's **full** `frame`, never
+    /// `visibleFrame`: the menu bar / Dock insets that `visibleFrame` carves
+    /// out would push the island away from the physical edge and reintroduce
+    /// the gap this function exists to prevent.
+    ///
+    /// `PanelView` pins the island to the container's **trailing** edge, so
+    /// with `edge == .right` the island's right edge lands exactly on
+    /// `screenFrame.maxX`.
+    static func dockedFrame(
+        screenFrame: CGRect,
+        serviceCount: Int,
+        verticalPosition: PanelVerticalPosition,
+        edge: PanelEdge = .right,
+        margin: CGFloat = verticalEdgeMargin
+    ) -> CGRect {
+        let size = containerSize(serviceCount: serviceCount)
+        let x: CGFloat
+        switch edge {
+        case .right: x = screenFrame.maxX - size.width
+        case .left: x = screenFrame.minX
+        }
+        return CGRect(
+            origin: CGPoint(
+                x: x,
+                y: dockedOriginY(
+                    screenFrame: screenFrame,
+                    serviceCount: serviceCount,
+                    verticalPosition: verticalPosition,
+                    margin: margin
+                )
+            ),
+            size: size
+        )
+    }
+
+    /// Off-screen frame the panel slides in from / out to: the whole
+    /// container parked just past the chosen edge, same vertical placement as
+    /// `dockedFrame`.
+    static func offscreenFrame(
+        screenFrame: CGRect,
+        serviceCount: Int,
+        verticalPosition: PanelVerticalPosition,
+        edge: PanelEdge = .right,
+        margin: CGFloat = verticalEdgeMargin
+    ) -> CGRect {
+        var frame = dockedFrame(
+            screenFrame: screenFrame,
+            serviceCount: serviceCount,
+            verticalPosition: verticalPosition,
+            edge: edge,
+            margin: margin
+        )
+        switch edge {
+        case .right: frame.origin.x = screenFrame.maxX
+        case .left: frame.origin.x = screenFrame.minX - frame.width
+        }
+        return frame
+    }
 }

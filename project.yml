@@ -11,8 +11,20 @@ settings:
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal
     MACOSX_DEPLOYMENT_TARGET: "13.0"
-    CODE_SIGN_STYLE: Automatic
+    # Signing identity is pinned rather than left to "Automatic" on purpose.
+    # macOS ties the Accessibility (TCC) grant to the app's code signature, and
+    # letting Xcode pick whatever identity happens to be in the keychain makes
+    # that signature vary between machines and between builds, silently
+    # invalidating the permission the user already gave. "-" is ad-hoc: stable
+    # in *identity*, but its designated requirement still pins the binary hash,
+    # so a rebuild invalidates the grant anyway. Override it with a self-signed
+    # certificate for a grant that survives rebuilds — see README,
+    # "Accessibility during development":
+    #   xcodebuild ... CODE_SIGN_IDENTITY="Mana Dev"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
+    PROVISIONING_PROFILE_SPECIFIER: ""
     ENABLE_HARDENED_RUNTIME: NO
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
 

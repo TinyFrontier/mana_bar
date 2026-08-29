@@ -13,10 +13,17 @@ import Foundation
 /// debounce delays from §3.5 (appear ~120ms, disappear ~350ms — defaults
 /// mirror `AppSettings.appearDelayMs` / `.disappearDelayMs`).
 ///
-/// Requires Accessibility permission (ТЗ §7): `start()` checks
-/// `AXIsProcessTrusted()` first and refuses to install the monitor if it's
-/// not granted, exposing `accessibilityAvailable` so the caller can fall
-/// back to the menu-bar "Show/Hide Panel" toggle (ТЗ §11).
+/// Accessibility permission (ТЗ §7) and `start()`: mouse-move events are the
+/// one class of global event `NSEvent.addGlobalMonitorForEvents` delivers
+/// *without* the Accessibility grant (only key events are gated on it), so
+/// `start()` installs the monitors unconditionally and reports whether the
+/// install actually succeeded. `accessibilityAvailable` is kept as a
+/// last-observed status for the onboarding UI, not as a gate — refusing to
+/// install without the grant is what left hover-to-show dead even on machines
+/// where it would have worked. `start()` is also idempotent and safe to
+/// re-call, which is how `AppDelegate` re-arms the monitor the moment
+/// `AccessibilityPermissionMonitor` sees a grant, with no app restart
+/// (ТЗ §11 keeps the menu-bar "Show/Hide Panel" fallback either way).
 final class HotZoneMonitor {
     private var globalMonitor: Any?
     private var localMonitor: Any?
@@ -54,9 +61,26 @@ final class HotZoneMonitor {
 
     private(set) var isInsideHotZoneOrPanel = false
 
-    /// Whether Accessibility permission is currently granted. `start()`
-    /// refuses to install monitors when this is `false` (ТЗ §11 fallback).
+    /// Accessibility permission state as of the last `start()` — reported for
+    /// the onboarding status row only; it does not gate the monitors.
     private(set) var accessibilityAvailable = false
+
+    /// `true` while the global mouse-move monitor is installed.
+    var isRunning: Bool { globalMonitor != nil }
+
+    /// Event-monitor installers/remover, injectable so tests can drive
+    /// `start()`/`stop()` without touching the real global event stream.
+    /// Production defaults call `NSEvent` directly.
+    var installGlobalMonitor: (@escaping (NSEvent) -> Void) -> Any? = { handler in
+        NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved, handler: handler)
+    }
+    var installLocalMonitor: (@escaping (NSEvent) -> Void) -> Any? = { handler in
+        NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { event in
+            handler(event)
+            return event
+        }
+    }
+    var removeMonitor: (Any) -> Void = { NSEvent.removeMonitor($0) }
 
     init() {}
 
@@ -64,31 +88,36 @@ final class HotZoneMonitor {
         stop()
     }
 
-    /// Installs the global + local mouse-move monitors. Returns `false`
-    /// (and installs nothing) if Accessibility permission isn't granted.
+    /// Installs the global + local mouse-move monitors.
+    ///
+    /// Idempotent: a second call while already running is a no-op that still
+    /// returns `true`, so `AppDelegate` can retry it freely (e.g. right after
+    /// an Accessibility grant) without leaking monitors.
+    ///
+    /// - Returns: whether the global monitor is installed afterwards. `false`
+    ///   means AppKit refused the install and the menu-bar "Show/Hide Panel"
+    ///   fallback is the only way in (ТЗ §11).
     @discardableResult
     func start() -> Bool {
         accessibilityAvailable = AXIsProcessTrusted()
-        guard accessibilityAvailable else { return false }
         guard globalMonitor == nil else { return true }
 
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+        globalMonitor = installGlobalMonitor { [weak self] _ in
             self?.handleMouseMoved()
         }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+        localMonitor = installLocalMonitor { [weak self] _ in
             self?.handleMouseMoved()
-            return event
         }
-        return true
+        return globalMonitor != nil
     }
 
     /// Removes the monitors and cancels any pending debounce timers.
     func stop() {
         if let globalMonitor {
-            NSEvent.removeMonitor(globalMonitor)
+            removeMonitor(globalMonitor)
         }
         if let localMonitor {
-            NSEvent.removeMonitor(localMonitor)
+            removeMonitor(localMonitor)
         }
         globalMonitor = nil
         localMonitor = nil

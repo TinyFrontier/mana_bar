@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var usageCoordinator: UsageCoordinator?
     private var onboardingWindow: NSWindow?
     private var settingsSubscriptions: Set<AnyCancellable> = []
+    private let accessibilityMonitor = AccessibilityPermissionMonitor.shared
 
     private let panelModel = PanelModel(serviceOrder: AppSettings.shared.effectiveServiceOrder, statuses: [:])
 
@@ -48,14 +49,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.hotZoneMonitor = hotZoneMonitor
 
-        // ТЗ §11 risk / §7 fallback: if Accessibility permission isn't
-        // granted, `start()` installs nothing and returns false — global
-        // hover tracking simply won't fire, and the menu-bar "Show/Hide
-        // Panel" item (wired below) is the only way to reveal the panel.
-        // The onboarding window (shown below on first launch, or any time
-        // from the menu) explains this and offers the System Settings
-        // prompt.
-        _ = hotZoneMonitor.start()
+        // ТЗ §7/§11: arm hover tracking now, and keep watching the
+        // Accessibility grant so a permission granted *while the app is
+        // running* re-arms it without a restart (see
+        // `observeAccessibilityPermission`). The menu-bar "Show/Hide Panel"
+        // item (wired below) stays the fallback either way.
+        startHotZoneMonitorIfPossible()
+        observeAccessibilityPermission()
 
         let coordinator = Self.makeUsageCoordinator(model: panelModel)
         usageCoordinator = coordinator
@@ -106,7 +106,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         hotZoneMonitor?.stop()
+        accessibilityMonitor.stopPolling()
         usageCoordinator?.stop()
+    }
+
+    /// Coming back from System Settings reactivates Mana — a free, exact
+    /// moment to re-read the grant instead of waiting out the poll interval.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        accessibilityMonitor.recheck()
+    }
+
+    // MARK: - Accessibility permission (ТЗ §7, §11)
+
+    /// Installs the hot-zone mouse monitor, and leaves
+    /// `AccessibilityPermissionMonitor` polling only while something is still
+    /// missing.
+    ///
+    /// Mouse-move events don't strictly require the Accessibility grant (only
+    /// key events do — see `HotZoneMonitor`), so this normally succeeds on the
+    /// first try; the poll exists for the case where it doesn't, and to keep
+    /// the onboarding's status row live.
+    @discardableResult
+    private func startHotZoneMonitorIfPossible() -> Bool {
+        guard let hotZoneMonitor else { return false }
+        let started = hotZoneMonitor.start()
+        if started && accessibilityMonitor.isTrusted {
+            accessibilityMonitor.stopPolling()
+        } else {
+            accessibilityMonitor.startPollingIfNeeded()
+        }
+        return started
+    }
+
+    /// macOS posts no notification when the Accessibility switch is flipped,
+    /// so `AccessibilityPermissionMonitor` polls for it; this is the other
+    /// half — the moment the grant appears, the hot-zone monitor is (re)armed
+    /// in place. No restart, no "quit and reopen Mana" instruction.
+    private func observeAccessibilityPermission() {
+        accessibilityMonitor.$isTrusted
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] trusted in
+                guard let self, trusted else { return }
+                guard self.hotZoneMonitor?.isRunning != true else {
+                    // Already tracking; just refresh the reported status.
+                    _ = self.hotZoneMonitor?.start()
+                    return
+                }
+                self.startHotZoneMonitorIfPossible()
+            }
+            .store(in: &settingsSubscriptions)
     }
 
     /// Builds the two providers (Claude, ChatGPT), each with a silent
@@ -246,6 +295,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Shows the onboarding window, creating it once and reusing it after
     /// (reachable both on first launch and from the status-bar menu).
     private func showOnboardingWindow() {
+        // Whatever the window shows must be current the instant it appears,
+        // not whatever was true when the app launched.
+        accessibilityMonitor.recheck()
+        accessibilityMonitor.startPollingIfNeeded()
+
         if let onboardingWindow {
             NSApp.activate(ignoringOtherApps: true)
             onboardingWindow.makeKeyAndOrderFront(nil)

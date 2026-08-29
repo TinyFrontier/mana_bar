@@ -55,9 +55,18 @@ struct PanelView: View {
 
             island
         }
+        // `alignment: .trailing` is load-bearing, not cosmetic: the ZStack
+        // only ever measures as wide as its widest child (62pt island alone,
+        // 300pt once the card is present — `.offset` doesn't affect layout),
+        // so the default `.center` alignment floated the island ~168pt away
+        // from the container's trailing edge and, through it, from the screen
+        // edge the window is docked to. Pinning trailing is what makes
+        // "window right edge == screen.frame.maxX" also mean "island is flush
+        // with the screen edge" (ТЗ §3.2).
         .frame(
             width: PanelLayoutMetrics.containerWidth(),
-            height: PanelLayoutMetrics.containerHeight(serviceCount: services.count)
+            height: PanelLayoutMetrics.containerHeight(serviceCount: services.count),
+            alignment: .trailing
         )
         // design-spec.md §6.3: card fade+slide, 150ms ease-out.
         .animation(.easeOut(duration: 0.15), value: hoveredServiceID)

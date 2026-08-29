@@ -30,6 +30,66 @@ final class PanelLogicTests: XCTestCase {
         XCTAssertEqual(leftEdgeRect.minX, screenFrame.minX)
     }
 
+    // MARK: HotZoneMonitor start/stop (ТЗ §7, §11)
+
+    /// Regression: `start()` used to bail out whenever `AXIsProcessTrusted()`
+    /// was false, so hover-to-show stayed dead for the whole run even after
+    /// the user granted permission. It now always attempts the install (mouse
+    /// -move events aren't gated on the Accessibility grant — only key events
+    /// are) and is safe to re-call, which is how `AppDelegate` re-arms it
+    /// live.
+    func testHotZoneMonitorStartIsIdempotentAndRearmable() {
+        final class Installs {
+            var global = 0
+            var local = 0
+            var removals = 0
+        }
+        let installs = Installs()
+
+        let monitor = HotZoneMonitor()
+        monitor.installGlobalMonitor = { _ in
+            installs.global += 1
+            return NSObject()
+        }
+        monitor.installLocalMonitor = { _ in
+            installs.local += 1
+            return NSObject()
+        }
+        monitor.removeMonitor = { _ in installs.removals += 1 }
+
+        XCTAssertFalse(monitor.isRunning)
+        XCTAssertTrue(monitor.start())
+        XCTAssertTrue(monitor.isRunning)
+        XCTAssertEqual(installs.global, 1)
+        XCTAssertEqual(installs.local, 1)
+
+        // Re-calling while running must not stack monitors.
+        XCTAssertTrue(monitor.start())
+        XCTAssertEqual(installs.global, 1)
+        XCTAssertEqual(installs.local, 1)
+
+        monitor.stop()
+        XCTAssertFalse(monitor.isRunning)
+        XCTAssertEqual(installs.removals, 2)
+
+        // Re-armable after a stop (the post-grant path).
+        XCTAssertTrue(monitor.start())
+        XCTAssertEqual(installs.global, 2)
+        monitor.stop()
+    }
+
+    /// A failed install is reported honestly, so `AppDelegate` keeps watching
+    /// instead of assuming hover tracking is live.
+    func testHotZoneMonitorReportsFailedInstall() {
+        let monitor = HotZoneMonitor()
+        monitor.installGlobalMonitor = { _ in nil }
+        monitor.installLocalMonitor = { _ in nil }
+        monitor.removeMonitor = { _ in }
+
+        XCTAssertFalse(monitor.start())
+        XCTAssertFalse(monitor.isRunning)
+    }
+
     // MARK: UsageLevel (design-spec.md §2.2: ≤50 green, 50–80 yellow, >80 red)
 
     func testUsageLevelThresholds() {

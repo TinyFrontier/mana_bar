@@ -1,4 +1,3 @@
-import ApplicationServices
 import SwiftUI
 
 /// First-run onboarding content (ТЗ §7): explains why Accessibility
@@ -12,7 +11,11 @@ import SwiftUI
 /// status-bar menu.
 struct OnboardingView: View {
     @ObservedObject private var settings = AppSettings.shared
-    @State private var accessibilityGranted = AXIsProcessTrusted()
+    /// Single source of truth for the Accessibility grant, shared with
+    /// `AppDelegate` — the same object that re-arms `HotZoneMonitor` also
+    /// drives this status row, so the two can't disagree. It polls only while
+    /// permission is missing and stops itself once granted.
+    @ObservedObject private var accessibility = AccessibilityPermissionMonitor.shared
     @State private var claudeFinding: CredentialSourceStatus.Finding?
     @State private var chatgptFinding: CredentialSourceStatus.Finding?
 
@@ -20,7 +23,7 @@ struct OnboardingView: View {
     /// closes the hosting window from this.
     var onDone: () -> Void = {}
 
-    private let accessibilityPoll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private var accessibilityGranted: Bool { accessibility.isTrusted }
 
     var body: some View {
         ScrollView {
@@ -50,9 +53,9 @@ struct OnboardingView: View {
             .padding(24)
         }
         .frame(width: 480, height: 580)
-        .task { await refreshCredentialStatus() }
-        .onReceive(accessibilityPoll) { _ in
-            accessibilityGranted = AXIsProcessTrusted()
+        .task {
+            accessibility.startPollingIfNeeded()
+            await refreshCredentialStatus()
         }
     }
 
@@ -69,24 +72,36 @@ struct OnboardingView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack {
+            HStack(spacing: 8) {
                 statusRow(granted: accessibilityGranted, foundLabel: "Granted", missingLabel: "Not granted")
                 Spacer()
+                // Explicit re-read, for the case where the switch was flipped
+                // in System Settings and the user wants an answer *now*
+                // rather than at the next poll tick.
+                Button("Recheck") { accessibility.recheck() }
                 Button(accessibilityGranted ? "Granted" : "Open System Settings…") {
-                    requestAccessibility()
+                    accessibility.requestAccess()
                 }
                 .disabled(accessibilityGranted)
             }
-        }
-    }
 
-    private func requestAccessibility() {
-        // AXIsProcessTrustedWithOptions with the prompt option raises
-        // macOS's own "not trusted" dialog, which includes an
-        // "Open System Settings" button (ТЗ §7).
-        let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        let options = [promptKey: true] as CFDictionary
-        accessibilityGranted = AXIsProcessTrustedWithOptions(options)
+            if !accessibilityGranted {
+                // ТЗ §11: macOS remembers a grant against the app's code
+                // signature, so a rebuilt (ad-hoc signed) development build
+                // can show as ON in System Settings while the system still
+                // treats it as untrusted. See README → "Accessibility during
+                // development".
+                Text("""
+                Still says "Not granted" with the switch already on? macOS is \
+                holding a stale permission for an older build. Turn Mana off \
+                and on again in that list — or run \
+                `tccutil reset Accessibility com.manabar.Mana` — then relaunch.
+                """)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     // MARK: - 2. Token sources (ТЗ §4.2, §7)
