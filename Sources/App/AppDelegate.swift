@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotZoneMonitor: HotZoneMonitor?
     private var usageCoordinator: UsageCoordinator?
     private var onboardingWindow: NSWindow?
+    private let settingsWindowController = SettingsWindowController()
     private var settingsSubscriptions: Set<AnyCancellable> = []
     private let accessibilityMonitor = AccessibilityPermissionMonitor.shared
 
@@ -70,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         statusBarController = StatusBarController(
+            openSettings: { [weak self] in self?.settingsWindowController.show() },
             togglePanel: { [weak self] in self?.toggleManualPanel() },
             refreshNow: { [weak self] in
                 Task { await self?.usageCoordinator?.refreshNow() }

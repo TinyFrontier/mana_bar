@@ -14,6 +14,9 @@ import AppKit
 final class StatusBarController {
     private let statusItem: NSStatusItem
 
+    /// Opens the Settings window (own `NSWindow`, not the SwiftUI `Settings`
+    /// scene — see `SettingsWindowController` for why).
+    private let openSettings: () -> Void
     /// Manual show/hide fallback (ТЗ §11): invoked by the "Show/Hide Panel"
     /// menu item, independent of the Accessibility-gated hot-zone monitor.
     private let togglePanel: () -> Void
@@ -40,11 +43,13 @@ final class StatusBarController {
     }
 
     init(
+        openSettings: @escaping () -> Void = {},
         togglePanel: @escaping () -> Void = {},
         refreshNow: @escaping () -> Void = {},
         togglePause: @escaping (Bool) -> Void = { _ in },
         showOnboarding: @escaping () -> Void = {}
     ) {
+        self.openSettings = openSettings
         self.togglePanel = togglePanel
         self.refreshNow = refreshNow
         self.togglePause = togglePause
@@ -66,14 +71,14 @@ final class StatusBarController {
     private func configureMenu() {
         let menu = NSMenu()
 
-        let openSettings = NSMenuItem(
+        let openSettingsItem = NSMenuItem(
             title: "Open Settings",
-            action: #selector(openSettings(_:)),
+            action: #selector(openSettingsAction(_:)),
             keyEquivalent: ","
         )
-        openSettings.tag = MenuItemTag.openSettings.rawValue
-        openSettings.target = self
-        menu.addItem(openSettings)
+        openSettingsItem.tag = MenuItemTag.openSettings.rawValue
+        openSettingsItem.target = self
+        menu.addItem(openSettingsItem)
 
         // ТЗ §11 fallback: works whether or not Accessibility permission is
         // granted, since it doesn't depend on the hot-zone mouse monitor.
@@ -126,13 +131,8 @@ final class StatusBarController {
         statusItem.menu = menu
     }
 
-    @objc private func openSettings(_ sender: Any?) {
-        // SwiftUI `Settings` scene, opened the AppKit way (no SettingsLink
-        // before macOS 14). TODO: swap for SettingsLink once min target allows.
-        if #available(macOS 13, *) {
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        }
+    @objc private func openSettingsAction(_ sender: Any?) {
+        openSettings()
     }
 
     @objc private func toggleShowHidePanel(_ sender: Any?) {
