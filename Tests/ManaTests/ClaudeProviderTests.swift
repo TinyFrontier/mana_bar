@@ -106,7 +106,7 @@ final class ClaudeProviderTests: XCTestCase {
 
     /// Same state, but with an existence probe that cannot answer — the shape
     /// seen in the field when an interactive dialog holds the silent gate. The
-    /// card must still say "grant needed", not "Источник токена не найден":
+    /// card must still say "grant needed", not "No token source found":
     /// the user is logged in, and a re-login would not fix anything.
     func testUnanswerableExistenceProbeStillReportsKeychainAccessDenied() async throws {
         let directory = TemporaryDirectory(self)

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Per-request time budgets, in one place because getting them wrong is what
-/// produced the "Нет соединения on first launch" bug.
+/// produced the "No connection on first launch" bug.
 ///
 /// The usage GETs used to allow 10 s. That is plenty for a *warm* process —
 /// every poll after the first reuses an open connection and finishes in

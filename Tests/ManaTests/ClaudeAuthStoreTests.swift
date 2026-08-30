@@ -349,7 +349,7 @@ final class ClaudeAuthStoreTests: XCTestCase {
     /// The existence probe can fail to answer at all — it loses the silent gate
     /// to an open interactive dialog, or `securityd` refuses the attributes
     /// query. "Could not tell" is not "not there": treating it as absence is
-    /// what made a logged-in user see "Источник токена не найден" instead of
+    /// what made a logged-in user see "No token source found" instead of
     /// the one-time-grant prompt. The silent read still separates the two.
     func testKeychainAccessIsDeniedWhenTheExistenceProbeCannotAnswer() throws {
         let directory = TemporaryDirectory(self)

@@ -51,14 +51,14 @@ enum UsageError: Error, Equatable, Sendable {
     /// Short human-readable text for the detail card (ТЗ §4.3).
     var userDescription: String {
         switch self {
-        case .notLoggedIn: return "Источник токена не найден"
-        case .keychainAccessDenied: return "Нужно разрешение Keychain — нажмите Refresh Now"
-        case .sessionExpired: return "Сессия истекла — залогиньтесь в CLI"
-        case .missingScope: return "Токену не хватает прав для usage-данных"
-        case .rateLimited: return "Слишком много запросов — пауза"
-        case .requestFailed(let code): return "Ошибка сервиса (HTTP \(code))"
-        case .connectionFailed: return "Нет соединения"
-        case .decodingFailed: return "Неожиданный формат ответа"
+        case .notLoggedIn: return "No token source found"
+        case .keychainAccessDenied: return "Keychain permission needed — click Refresh Now"
+        case .sessionExpired: return "Session expired — sign in again in the CLI"
+        case .missingScope: return "Token lacks the scope for usage data"
+        case .rateLimited: return "Too many requests — paused"
+        case .requestFailed(let code): return "Service error (HTTP \(code))"
+        case .connectionFailed: return "No connection"
+        case .decodingFailed: return "Unexpected response format"
         }
     }
 }

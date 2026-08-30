@@ -732,7 +732,7 @@ final class UsageCoordinatorTests: XCTestCase {
     //
     // Live-feedback bug: on the reporter's first launch both providers failed
     // (a cold TLS setup on a briefly degraded link blew the request budget)
-    // and the panel then sat on gray "Нет соединения" rings for a full two
+    // and the panel then sat on gray "No connection" rings for a full two
     // minutes — 60s post-failure cooldown, then the 2-minute poll timer —
     // even though the network was healthy seconds later.
 
@@ -867,8 +867,8 @@ final class UsageCoordinatorTests: XCTestCase {
     /// `UsageError` is frozen and has a single `.connectionFailed` for both
     /// "offline" (fails in milliseconds) and "ran out of time" (burns the
     /// whole budget). The coordinator classifies by measured duration so the
-    /// card can say "Сервис не отвечает" instead of the disprovable
-    /// "Нет соединения".
+    /// card can say "Service not responding" instead of the disprovable
+    /// "No connection".
     func testSlowConnectionFailureIsReportedAsATimeout() async {
         let clock = TestClock()
         let claude = GatedUsageProvider(serviceID: .claude)
@@ -898,12 +898,12 @@ final class UsageCoordinatorTests: XCTestCase {
         XCTAssertTrue(model.timedOutServiceIDs.contains(.claude), "a connection failure that burned the budget is a timeout")
         XCTAssertEqual(
             UsageErrorCopy.text(for: .connectionFailed, timedOut: model.timedOutServiceIDs.contains(.claude)),
-            "Сервис не отвечает"
+            "Service not responding"
         )
     }
 
     /// The other half: an *instant* connection failure is a genuinely offline
-    /// machine and must keep saying "Нет соединения".
+    /// machine and must keep saying "No connection".
     func testInstantConnectionFailureIsNotReportedAsATimeout() async {
         let clock = TestClock()
         let claude = FakeUsageProvider(serviceID: .claude, queued: [.failure(.connectionFailed)])

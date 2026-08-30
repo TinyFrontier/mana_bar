@@ -89,7 +89,7 @@ enum ResetFormatter {
 }
 
 extension ResetFormatter {
-    /// "через ~N мин" (deadline within the next hour) / "в HH:MM" (further
+    /// "in ~N min" (deadline within the next hour) / "at HH:MM" (further
     /// out) for the `.rateLimited` detail-card copy (ТЗ §4.3 live-feedback
     /// fix: the previous "Re-login via CLI" button was meaningless for a
     /// rate limit — a manual refresh can't bypass this cooldown either, see
@@ -103,7 +103,7 @@ extension ResetFormatter {
 
         let minutes = Int((seconds / 60).rounded(.up))
         if minutes <= 60 {
-            return "через ~\(max(1, minutes)) мин"
+            return "in ~\(max(1, minutes)) min"
         }
 
         let formatter = DateFormatter()
@@ -111,7 +111,7 @@ extension ResetFormatter {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .current
         formatter.dateFormat = "HH:mm"
-        return "в \(formatter.string(from: cooldownUntil))"
+        return "at \(formatter.string(from: cooldownUntil))"
     }
 }
 
@@ -204,12 +204,12 @@ struct RingPresentation: Equatable {
 /// completely different to the user: "this machine is offline" (fails in
 /// milliseconds) and "the request was still waiting when the budget ran out"
 /// (fails after the full timeout — the service, DNS or the link is slow, but
-/// the machine is online). Printing "Нет соединения" for the second one is a
+/// the machine is online). Printing "No connection" for the second one is a
 /// lie the user can disprove by loading any web page, so the coordinator
 /// reports which of the two it was (`PanelModel.timedOutServiceIDs`, set from
 /// the measured fetch duration) and this picks the honest wording.
 enum UsageErrorCopy {
-    static let timedOutDescription = "Сервис не отвечает"
+    static let timedOutDescription = "Service not responding"
 
     static func text(for error: UsageError, timedOut: Bool) -> String {
         if timedOut, case .connectionFailed = error { return timedOutDescription }

@@ -37,14 +37,14 @@ final class PanelModel: ObservableObject {
     /// milliseconds). `UsageError` is a frozen contract with one case for
     /// both, so the coordinator — the only writer — classifies by measured
     /// fetch duration and records the answer here; `UsageErrorCopy` turns it
-    /// into the honest wording ("Сервис не отвечает" vs "Нет соединения").
+    /// into the honest wording ("Service not responding" vs "No connection").
     /// Cleared on any success or any other kind of failure.
     @Published private(set) var timedOutServiceIDs: Set<ServiceID> = []
 
     /// Wall-clock deadline of an active `.rateLimited` cooldown, when known —
     /// `UsageCoordinator` is the only writer (`recordFailure`/`recordSuccess`).
-    /// `DetailCardView`'s rate-limited copy uses this to show "через ~N мин"/
-    /// "в HH:MM" instead of a re-login button that would be misleading for a
+    /// `DetailCardView`'s rate-limited copy uses this to show "in ~N min"/
+    /// "at HH:MM" instead of a re-login button that would be misleading for a
     /// rate limit (manual refresh doesn't bypass this cooldown either way).
     @Published private(set) var cooldownUntil: [ServiceID: Date] = [:]
 

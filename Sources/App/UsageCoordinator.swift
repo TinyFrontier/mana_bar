@@ -74,7 +74,7 @@ enum UsageCoordinatorTuning {
     static let launchRetryDelays: [TimeInterval] = [15, 30, 60]
 
     /// A `.connectionFailed` that took at least this long is reported as a
-    /// timeout ("Сервис не отвечает") rather than "no connection" — an
+    /// timeout ("Service not responding") rather than "no connection" — an
     /// actually-offline machine fails in milliseconds, while a request that
     /// burned its whole budget means the link or the service is slow, not
     /// absent. `UsageError` is frozen and has one case for both, so the

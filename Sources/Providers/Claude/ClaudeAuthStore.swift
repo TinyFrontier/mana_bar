@@ -204,7 +204,7 @@ struct ClaudeAuthStore: Sendable {
                 // silent gate was held by an open interactive dialog, or
                 // `securityd` refused the attributes query outright), and
                 // treating "could not answer" as "not there" is exactly how a
-                // logged-in user ends up reading "Источник токена не найден"
+                // logged-in user ends up reading "No token source found"
                 // when the real state is a missing one-time grant. The read
                 // below still separates the two: denied throws, absent does
                 // not.

@@ -12,7 +12,7 @@ import SwiftUI
 ///   with a compact one-line warning underneath — never the full error
 ///   block, so a transient failure never makes numbers disappear.
 /// - `.unavailable(.rateLimited)`: explanatory text plus, when the
-///   coordinator's cooldown deadline is known, "через ~N мин"/"в HH:MM" —
+///   coordinator's cooldown deadline is known, "in ~N min"/"at HH:MM" —
 ///   deliberately NO button (see `errorSection`).
 /// - `.unavailable(.keychainAccessDenied)`: "Grant access" button.
 /// - `.unavailable(.notLoggedIn / .sessionExpired / .missingScope)`: a CLI
@@ -254,8 +254,8 @@ struct DetailCardView: View {
     /// alone doesn't say which one.
     private var cliLoginHint: String {
         switch serviceID {
-        case .claude: return "Залогиньтесь через `claude` в терминале, затем нажмите кнопку."
-        case .chatgpt: return "Залогиньтесь через `codex` в терминале, затем нажмите кнопку."
+        case .claude: return "Sign in with `claude` in a terminal, then click the button."
+        case .chatgpt: return "Sign in with `codex` in a terminal, then click the button."
         }
     }
 
@@ -275,7 +275,7 @@ struct DetailCardView: View {
                 // cooldown (`UsageCoordinator.eligible`). No button at all;
                 // just say when Mana will try again on its own.
                 if let hint = ResetFormatter.rateLimitRetryHint(cooldownUntil: cooldownUntil) {
-                    Text("Повторим автоматически \(hint).")
+                    Text("Retrying automatically \(hint).")
                         .font(.system(size: 11.5))
                         .lineSpacing(11.5 * 0.4)
                         .foregroundStyle(ManaColor.textVeryFaint)
@@ -285,7 +285,7 @@ struct DetailCardView: View {
                 // ТЗ addendum (silent-path Keychain fix): the permission is a
                 // one-time grant, not a re-login — spell that out so the user
                 // knows a single click fixes it for good.
-                Text("Разрешение выдаётся один раз: подтвердите «Always Allow» в системном диалоге Keychain.")
+                Text("The grant is one-time: choose \u{201C}Always Allow\u{201D} in the Keychain dialog.")
                     .font(.system(size: 11.5))
                     .lineSpacing(11.5 * 0.4)
                     .foregroundStyle(ManaColor.textVeryFaint)

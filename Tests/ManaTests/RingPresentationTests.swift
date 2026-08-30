@@ -109,12 +109,12 @@ final class RingPresentationTests: XCTestCase {
     // MARK: - UsageErrorCopy (timeout vs offline)
 
     /// `.connectionFailed` covers both "this machine is offline" and "the
-    /// request ran out of time". Telling a user with a working browser "Нет
-    /// соединения" is a lie they can immediately disprove.
+    /// request ran out of time". Telling a user with a working browser "No
+    /// connection" is a lie they can immediately disprove.
     func testTimedOutConnectionFailureGetsItsOwnWording() {
         XCTAssertEqual(
             UsageErrorCopy.text(for: .connectionFailed, timedOut: true),
-            "Сервис не отвечает"
+            "Service not responding"
         )
         XCTAssertEqual(
             UsageErrorCopy.text(for: .connectionFailed, timedOut: false),
