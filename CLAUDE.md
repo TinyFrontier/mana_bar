@@ -28,6 +28,14 @@ notarized .dmg), not sandboxed — see spec for why.
   не расширяй его обратно на `.keychain`. Уточнение закреплено в
   `docs/ТЗ-Mana.md` §4.2 (отменяет прежнее «обратно в тот же источник»).
 
+- **2026-08-30 — Cursor: рефреш только реактивный.** Access-token Cursor несёт
+  `exp`, который его же API игнорирует: наблюдался токен, просроченный по `exp`
+  почти на два года и при этом успешно отвечающий на
+  `GetCurrentPeriodUsage`. Превентивный рефреш по `exp` тратил refresh-токен на
+  каждый опрос и выдавал `sessionExpired` для рабочего логина. Токен
+  используется как есть, рефреш — только по 401/403 (`ProviderAuthRetry`);
+  не возвращай проверку `exp` в `CursorProvider`.
+
 ## Source of truth
 
 > Note for anyone reading this in the public repository: `docs/` is
@@ -50,8 +58,8 @@ notarized .dmg), not sandboxed — see spec for why.
 Sources/
   App/            ManaApp (@main), AppDelegate, StatusBarController
   Panel/          PanelWindow (NSPanel), HotZoneMonitor, PanelView, RingView, DetailCardView
-  Providers/      UsageProvider protocol, ServiceUsage model, ClaudeProvider, ChatGPTProvider
-  Storage/        KeychainStore
+  Providers/      UsageProvider protocol, ServiceUsage model, Claude/ChatGPT/Cursor providers
+  Storage/        KeychainStore, SQLiteStore, UsageSnapshotCache
   Settings/       AppSettings, SettingsView
   Notifications/  NotificationManager
 Tests/ManaTests/  XCTest target (smoke test currently)
@@ -95,6 +103,11 @@ xcodebuild -project Mana.xcodeproj -scheme Mana -configuration Debug test -desti
   polling, last-good snapshot on failure, 60s failure cooldown, 15s fetch
   timeout, wake refresh, pause/resume), onboarding, credential-source
   status.
+- **Cursor** (`Sources/Providers/Cursor/`): login read from Cursor's own
+  `state.vscdb` (`SQLiteCLIStore`, read-only `sqlite3`) with the
+  `cursor-access-token` Keychain items as fallback; usage from
+  `GetCurrentPeriodUsage`, mapped into one `.billingPeriod` window. Neither
+  source is ever written back.
 - **Settings/Notifications**: persisted `AppSettings` wired live;
   UNUserNotificationCenter thresholds with per-window cooldown.
 

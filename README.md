@@ -4,14 +4,14 @@
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-informational)](#requirements)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**How much of your Claude and ChatGPT limits is left — without opening a browser.**
+**How much of your Claude, ChatGPT and Cursor limits is left — without opening a browser.**
 
 Mana is a native macOS menu-bar app. Its panel lives hidden behind the edge of
 your screen and slides out when the cursor touches that edge, the way the
 Grammarly widget does. No Dock icon, no window in your way.
 
-It reuses the login your `claude` and `codex` CLIs already have, so there is no
-token to paste and no account to create.
+It reuses the logins those tools already have on your Mac, so there is no token
+to paste and no account to create.
 
 <p align="center">
   <img src="assets/panel.png" width="760"
@@ -42,6 +42,8 @@ xattr -d com.apple.quarantine /Applications/Mana.app
 - **Claude** — the rolling session window, the weekly all-models window and the
   weekly per-model one, each with the time it resets.
 - **ChatGPT** — the usage windows the Codex CLI login exposes.
+- **Cursor** — included usage for the current billing period, with the date it
+  renews.
 - A ring per service, colored by how close you are to the limit, plus a detail
   card on hover.
 - Notifications when a window crosses 80% or 95%, and when a limit resets.
@@ -59,6 +61,7 @@ vendor's own usage endpoint with them:
 |---------|--------------------|
 | Claude | Claude Code's Keychain item, `~/.claude/.credentials.json`, or Claude Desktop's encrypted cache |
 | ChatGPT | `~/.codex/auth.json`, or the `Codex Auth` Keychain item |
+| Cursor | Cursor's own `state.vscdb`, or its `cursor-access-token` Keychain item |
 
 What that means in practice:
 
@@ -78,9 +81,10 @@ macOS will ask once for permission to read Claude Code's Keychain item. Choose
 ## Requirements
 
 - macOS 13 (Ventura) or later
-- A logged-in [Claude Code CLI](https://claude.com/claude-code) and/or
-  [Codex CLI](https://developers.openai.com/codex/cli) — Mana shows a service
-  only when it finds that service's login
+- At least one signed-in source: [Claude Code CLI](https://claude.com/claude-code),
+  [Codex CLI](https://developers.openai.com/codex/cli) or
+  [Cursor](https://cursor.com) — Mana shows a service only when it finds that
+  service's login
 
 ## Not there yet
 

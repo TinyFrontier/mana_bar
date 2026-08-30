@@ -144,6 +144,27 @@ final class StubKeychain: KeychainReading, @unchecked Sendable {
     }
 }
 
+// MARK: - SQLite
+
+/// In-memory `SQLiteReading`, so no test ever reads the developer's real
+/// Cursor state database.
+final class StubSQLite: SQLiteReading, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: String]
+    /// When true, every read answers `nil` — a locked or missing database.
+    var isUnavailable = false
+
+    init(values: [String: String] = [:]) {
+        self.values = values
+    }
+
+    func value(inDatabase path: String, table: String, key: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return isUnavailable ? nil : values[key]
+    }
+}
+
 // MARK: - Files
 
 /// Per-test temporary directory. Auth-file decoding is exercised against real

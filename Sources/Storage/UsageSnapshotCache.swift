@@ -14,12 +14,14 @@ enum UsageWindowKindDTO: Codable, Equatable {
     case session
     case weekly
     case modelWeekly(String)
+    case billingPeriod
 
     init(_ kind: UsageWindow.Kind) {
         switch kind {
         case .session: self = .session
         case .weekly: self = .weekly
         case .modelWeekly(let name): self = .modelWeekly(name)
+        case .billingPeriod: self = .billingPeriod
         }
     }
 
@@ -28,6 +30,7 @@ enum UsageWindowKindDTO: Codable, Equatable {
         case .session: return .session
         case .weekly: return .weekly
         case .modelWeekly(let name): return .modelWeekly(name)
+        case .billingPeriod: return .billingPeriod
         }
     }
 }

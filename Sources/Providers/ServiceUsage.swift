@@ -9,6 +9,7 @@ import Foundation
 enum ServiceID: String, Codable, CaseIterable, Identifiable, Sendable {
     case claude
     case chatgpt
+    case cursor
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum ServiceID: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claude: return "Claude"
         case .chatgpt: return "ChatGPT"
+        case .cursor: return "Cursor"
         }
     }
 }
@@ -30,6 +32,10 @@ struct UsageWindow: Equatable, Sendable {
         /// Model-scoped weekly limit (Claude `limits[].kind == "weekly_scoped"`),
         /// e.g. "Sonnet". Associated value is the display name of the model.
         case modelWeekly(String)
+        /// A whole billing period rather than a rolling window (Cursor reports
+        /// included usage against `billingCycleStart`/`billingCycleEnd`, which
+        /// is neither a 5h session nor a 7d week).
+        case billingPeriod
     }
 
     let kind: Kind
@@ -77,10 +83,26 @@ struct ServiceUsage: Identifiable, Equatable, Sendable {
         windows.first { $0.kind == .weekly }
     }
 
+    /// The window a ring should show for this service: the rolling session for
+    /// services that have one, the billing period for services that do not
+    /// (Cursor). Falls back to the first window rather than rendering "no data"
+    /// for a service whose shape neither case covers.
+    var primaryWindow: UsageWindow? {
+        sessionWindow ?? billingPeriodWindow ?? windows.first
+    }
+
+    var billingPeriodWindow: UsageWindow? {
+        windows.first { $0.kind == .billingPeriod }
+    }
+
     /// Convenience 0...1 fractions for progress rings/bars. `nil` when the
     /// window is absent (render as "no data", not as an empty ring).
     var sessionFraction: Double? {
         sessionWindow.map { min(max($0.usedPercent / 100, 0), 1) }
+    }
+
+    var primaryFraction: Double? {
+        primaryWindow.map { min(max($0.usedPercent / 100, 0), 1) }
     }
 
     var weeklyFraction: Double? {

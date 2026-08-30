@@ -165,12 +165,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// instance for background/automatic polls and an interactive one used
     /// only by the "Refresh Now" menu action (ТЗ §4.2: background polls must
     /// never raise a Keychain dialog). Both `ClaudeAuthStore` and
-    /// `CodexAuthStore` support this split via `allowsKeychainInteraction`.
+    /// `CodexAuthStore` and `CursorAuthStore` support this split via
+    /// `allowsKeychainInteraction`.
     private static func makeUsageCoordinator(model: PanelModel) -> UsageCoordinator {
         let claudeSilentAuth = ClaudeAuthStore(allowsKeychainInteraction: false)
         let claudeInteractiveAuth = ClaudeAuthStore(allowsKeychainInteraction: true)
         let codexSilentAuth = CodexAuthStore(allowsKeychainInteraction: false)
         let codexInteractiveAuth = CodexAuthStore(allowsKeychainInteraction: true)
+        let cursorSilentAuth = CursorAuthStore(allowsKeychainInteraction: false)
+        let cursorInteractiveAuth = CursorAuthStore(allowsKeychainInteraction: true)
         let providers: [ServiceID: UsageCoordinator.ProviderPair] = [
             .claude: UsageCoordinator.ProviderPair(
                 silent: ClaudeProvider(authStore: claudeSilentAuth),
@@ -179,6 +182,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .chatgpt: UsageCoordinator.ProviderPair(
                 silent: ChatGPTProvider(authStore: codexSilentAuth),
                 interactive: ChatGPTProvider(authStore: codexInteractiveAuth)
+            ),
+            .cursor: UsageCoordinator.ProviderPair(
+                silent: CursorProvider(authStore: cursorSilentAuth),
+                interactive: CursorProvider(authStore: cursorInteractiveAuth)
             ),
         ]
         return UsageCoordinator(

@@ -7,12 +7,15 @@ import SwiftUI
 ///   (`#D97757`), rendered as-is.
 /// - `ServiceOpenAILogo` — the actual OpenAI mark, template-rendered so it
 ///   can be tinted (white on Mana's dark panel/card backgrounds).
+/// - `ServiceCursorLogo` — the Cursor mark, likewise template-rendered: the
+///   source SVG is a single `currentColor` path with no color of its own.
 extension ServiceID {
     /// Name of this service's entry in `Assets.xcassets`.
     var logoAssetName: String {
         switch self {
         case .claude: return "ServiceClaudeLogo"
         case .chatgpt: return "ServiceOpenAILogo"
+        case .cursor: return "ServiceCursorLogo"
         }
     }
 
@@ -23,6 +26,7 @@ extension ServiceID {
         switch self {
         case .claude: return "sparkles"
         case .chatgpt: return "bubble.left.fill"
+        case .cursor: return "cursorarrow.rays"
         }
     }
 }

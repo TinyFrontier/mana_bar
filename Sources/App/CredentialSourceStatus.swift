@@ -26,6 +26,7 @@ enum CredentialSourceStatus {
 
     private static let claudeSilentAuth = ClaudeAuthStore(allowsKeychainInteraction: false)
     private static let codexSilentAuth = CodexAuthStore(allowsKeychainInteraction: false)
+    private static let cursorSilentAuth = CursorAuthStore(allowsKeychainInteraction: false)
 
     /// Whether a local credential source was found for `serviceID`.
     /// `.needsKeychainPermission` counts as found here — a login does exist,
@@ -48,6 +49,9 @@ enum CredentialSourceStatus {
         case .chatgpt:
             if !codexSilentAuth.loadCredentials().isEmpty { return .found }
             return codexSilentAuth.keychainAccessIsDenied() ? .needsKeychainPermission : .notFound
+        case .cursor:
+            if !cursorSilentAuth.loadCredentials().isEmpty { return .found }
+            return cursorSilentAuth.keychainAccessIsDenied() ? .needsKeychainPermission : .notFound
         }
     }
 
@@ -57,6 +61,7 @@ enum CredentialSourceStatus {
         switch serviceID {
         case .claude: return "Install Claude Code and run `claude` in a terminal to log in."
         case .chatgpt: return "Install the Codex CLI and run `codex` in a terminal to log in."
+        case .cursor: return "Install Cursor and sign in to your account in the app."
         }
     }
 

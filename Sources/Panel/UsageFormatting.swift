@@ -148,7 +148,10 @@ struct RingPresentation: Equatable {
     var percent: Double
 
     static func make(status: ServiceStatus, isRefreshing: Bool = false) -> RingPresentation {
-        let percent = status.usage?.sessionWindow?.usedPercent ?? 0
+        // `primaryWindow`, not `sessionWindow`: Cursor reports a billing
+        // period instead of a rolling session, and a ring stuck at 0% would
+        // read as "nothing used" rather than "different shape of limit".
+        let percent = status.usage?.primaryWindow?.usedPercent ?? 0
         let fraction = min(max(percent / 100, 0), 1)
         let hasError = status.error != nil
 

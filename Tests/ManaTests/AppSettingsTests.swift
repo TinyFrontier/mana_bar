@@ -82,7 +82,9 @@ final class AppSettingsTests: XCTestCase {
         // contract (not just "the property changed in memory").
         let second = AppSettings(defaults: defaults)
 
-        XCTAssertEqual(second.serviceOrder, [.chatgpt, .claude])
+        // A service the stored order predates is appended rather than dropped,
+        // so adding a provider does not silently hide it for existing users.
+        XCTAssertEqual(second.serviceOrder, [.chatgpt, .claude, .cursor])
         XCTAssertEqual(second.enabledServiceIDs, [.claude])
         XCTAssertEqual(second.panelEdge, .left)
         XCTAssertEqual(second.verticalPosition, .top)

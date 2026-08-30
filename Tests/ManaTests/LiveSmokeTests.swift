@@ -31,6 +31,11 @@ final class LiveSmokeTests: XCTestCase {
         try await smoke(ChatGPTProvider(), name: "ChatGPT")
     }
 
+    func testCursorLiveUsage() async throws {
+        try XCTSkipUnless(isEnabled, "set MANA_LIVE_SMOKE=1 to run the live smoke test")
+        try await smoke(CursorProvider(), name: "Cursor")
+    }
+
     private func smoke(_ provider: some UsageProvider, name: String) async throws {
         let hasCredentials = await provider.hasLocalCredentials()
         try XCTSkipUnless(hasCredentials, "no local \(name) CLI login on this machine")

@@ -175,4 +175,37 @@ enum ProviderFixtures {
     static let codexAuthAPIKeyOnly = """
     { "OPENAI_API_KEY": "sk-fake-api-key" }
     """
+
+    // MARK: - Cursor
+
+    /// `GetCurrentPeriodUsage`, shaped exactly like the live response —
+    /// including the cycle bounds arriving as **strings** of epoch
+    /// milliseconds, which is the detail a hand-written fixture gets wrong.
+    static func cursorUsage(
+        totalPercentUsed: Double = 42,
+        apiPercentUsed: Double = 0,
+        cycleStartMilliseconds: Double = 1_785_565_415_253,
+        cycleEndMilliseconds: Double = 1_788_243_815_253,
+        enabled: Bool? = nil
+    ) -> String {
+        let enabledField = enabled.map { "\"enabled\": \($0)," } ?? ""
+        return """
+        {
+          \(enabledField)
+          "billingCycleStart": "\(Int(cycleStartMilliseconds))",
+          "billingCycleEnd": "\(Int(cycleEndMilliseconds))",
+          "planUsage": {
+            "autoPercentUsed": 0,
+            "apiPercentUsed": \(apiPercentUsed),
+            "totalPercentUsed": \(totalPercentUsed)
+          },
+          "spendLimitUsage": {
+            "pooledLimit": 0,
+            "individualLimit": 0,
+            "limitType": "user"
+          },
+          "displayMessage": "You've used \(Int(totalPercentUsed))% of your included usage"
+        }
+        """
+    }
 }

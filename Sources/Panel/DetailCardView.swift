@@ -150,6 +150,12 @@ struct DetailCardView: View {
             if let weeklyWindow = usage.weeklyWindow {
                 sectionRow(title: "All models", window: weeklyWindow, style: .absolute, animatesFill: false)
             }
+            // Cursor's shape: one billing period rather than session + weekly.
+            // Its own label carries the wording ("Included usage"), so it is
+            // used as the row title instead of a hardcoded one.
+            if let billingWindow = usage.billingPeriodWindow {
+                sectionRow(title: billingWindow.label, window: billingWindow, style: .absolute, animatesFill: true)
+            }
             ForEach(Array(modelWeeklyWindows(in: usage).enumerated()), id: \.offset) { _, window in
                 sectionRow(title: window.label, window: window, style: .absolute, animatesFill: false)
             }
@@ -256,6 +262,7 @@ struct DetailCardView: View {
         switch serviceID {
         case .claude: return "Sign in with `claude` in a terminal, then click the button."
         case .chatgpt: return "Sign in with `codex` in a terminal, then click the button."
+        case .cursor: return "Sign in to Cursor in the app, then click the button."
         }
     }
 
