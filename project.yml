@@ -44,7 +44,7 @@ targets:
       path: Sources/App/Info.plist
       properties:
         CFBundleDisplayName: Mana
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "0.1.1"
         CFBundleVersion: "1"
         LSUIElement: true
         LSMinimumSystemVersion: "13.0"
@@ -60,7 +60,7 @@ targets:
         PRODUCT_NAME: Mana
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_KEY_LSUIElement: YES
-        MARKETING_VERSION: "0.1.0"
+        MARKETING_VERSION: "0.1.1"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_EMIT_LOC_STRINGS: NO
         COMBINE_HIDPI_IMAGES: YES
