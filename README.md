@@ -15,7 +15,7 @@ to paste and no account to create.
 
 <p align="center">
   <img src="assets/panel.png" width="760"
-       alt="Mana's panel slid out from the right screen edge: a card showing Claude's current session at 15%, weekly all-models at 44% and weekly Fable at 41% with reset times, next to usage rings for Claude and ChatGPT.">
+       alt="Mana's panel slid out from the right screen edge: a card showing Claude's current session at 12%, weekly all-models at 46% and weekly Fable at 41% with reset times, next to usage rings for Claude, ChatGPT and Cursor.">
 </p>
 
 ## Install
