@@ -1,6 +1,6 @@
 cask "mana" do
-  version "0.1.1"
-  sha256 "d68247c9294b960c145a2c48fdacbbd2d1087adfdde10e3f88393a790328ec15"
+  version "0.1.2"
+  sha256 "b9019009ca280486f890f0e81293e10378328960ba3c595f512202199858b8f7"
 
   url "https://github.com/TinyFrontier/mana_bar/releases/download/v#{version}/Mana-#{version}.dmg"
   name "Mana"
