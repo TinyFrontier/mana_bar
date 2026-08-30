@@ -1,12 +1,19 @@
 # Mana
 
-Mana is a native macOS accessory app that shows current usage of AI-service
-subscription limits (Claude, ChatGPT, ...) in a compact panel hidden behind
-the right edge of the screen. The panel slides out when the cursor touches
-the edge — similar to the Grammarly desktop widget — and stays out of the
-way otherwise.
+[![Release](https://img.shields.io/github/v/release/TinyFrontier/mana_bar?color=%23c96442)](https://github.com/TinyFrontier/mana_bar/releases)
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-informational)](#requirements)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Full requirements: [`docs/ТЗ-Mana.md`](docs/ТЗ-Mana.md).
+**How much of your Claude and ChatGPT limits is left — without opening a browser.**
+
+Mana is a native macOS menu-bar app. Its panel lives hidden behind the edge of
+your screen and slides out when the cursor touches that edge, the way the
+Grammarly widget does. No Dock icon, no window in your way.
+
+It reuses the login your `claude` and `codex` CLIs already have, so there is no
+token to paste and no account to create.
+
+<!-- Screenshot goes here: docs-quality shot of the panel slid out, rings + detail card. -->
 
 ## Install
 
@@ -14,194 +21,93 @@ Full requirements: [`docs/ТЗ-Mana.md`](docs/ТЗ-Mana.md).
 brew install --cask TinyFrontier/tap/mana
 ```
 
-That taps [TinyFrontier/homebrew-tap](https://github.com/TinyFrontier/homebrew-tap)
-and installs the latest [release](https://github.com/TinyFrontier/mana_bar/releases)
-into `/Applications`. Upgrades come with `brew upgrade --cask mana`, removal
-with `brew uninstall --cask mana` (add `--zap` to also drop settings and the
-usage cache).
+Upgrade with `brew upgrade --cask mana`, remove with `brew uninstall --cask mana`
+(add `--zap` to also drop settings and the cached usage).
 
-Mana is signed with an Apple Development certificate and is **not notarized**
-— that needs a paid Apple Developer Program membership — so macOS would refuse
-to open it after a normal download. The cask strips the quarantine attribute
-from the installed app for you, and says so in its caveats. Installing the
-`.dmg` by hand instead means right-click → Open the app the first time, or:
+You can also grab the `.dmg` from [Releases](https://github.com/TinyFrontier/mana_bar/releases).
+Builds are code-signed but **not notarized yet** — that needs a paid Apple
+Developer Program membership — so macOS quarantines a manual download and
+refuses to open it. The Homebrew cask clears that for you. If you install the
+`.dmg` by hand, approve the app under System Settings → Privacy & Security, or:
 
 ```bash
 xattr -d com.apple.quarantine /Applications/Mana.app
 ```
 
-## Status
+## What it shows
 
-MVP implemented: live providers (Claude via Claude Code CLI / Claude
-Desktop tokens, ChatGPT via Codex CLI), the hot-zone slide-out panel with
-rings and detail cards, persisted settings, threshold notifications,
-first-run onboarding, and a `.dmg` packaging pipeline (see "Packaging
-(.dmg)" below — signing works today with the local Apple Development
-identity; notarization is wired in but needs a paid Developer ID
-certificate to actually run). Remaining: left screen edge, explicit
-monitor picker, real service logos, a Developer ID certificate +
-notarization credentials for real distribution.
+- **Claude** — the rolling session window, the weekly all-models window and the
+  weekly per-model one, each with the time it resets.
+- **ChatGPT** — the usage windows the Codex CLI login exposes.
+- A ring per service, colored by how close you are to the limit, plus a detail
+  card on hover.
+- Notifications when a window crosses 80% or 95%, and when a limit resets.
+- Settings for which services to show and in what order, which screen edge the
+  panel hides behind and how far down it sits, how often usage refreshes, and
+  whether Mana starts at login.
+
+## Where the numbers come from
+
+Mana reads the OAuth tokens that Claude Code, Claude Desktop and the Codex CLI
+already store on your Mac — the same logins those tools use — and calls each
+vendor's own usage endpoint with them:
+
+| Service | Source of the login |
+|---------|--------------------|
+| Claude | Claude Code's Keychain item, `~/.claude/.credentials.json`, or Claude Desktop's encrypted cache |
+| ChatGPT | `~/.codex/auth.json`, or the `Codex Auth` Keychain item |
+
+What that means in practice:
+
+- **No token to paste, no Mana account.** If the CLI works, Mana works.
+- **Nothing leaves your machine** except the requests to Anthropic and OpenAI
+  themselves. No telemetry, no analytics, no crash reporting.
+- **Mana keeps no copy of your credentials.** Tokens are read at the moment of
+  a request and never written to its own storage; tokens and response bodies
+  are never logged.
+- **Read-only where it matters.** Mana never rewrites a CLI's Keychain item —
+  doing so breaks that CLI's own access to its credentials — and it never
+  touches Claude Desktop's refresh token, so your Desktop session survives.
+
+macOS will ask once for permission to read Claude Code's Keychain item. Choose
+**Always Allow** and background refreshes stay silent.
 
 ## Requirements
 
-- macOS 13.0+ (Ventura or newer)
-- Xcode 26.5+, Swift 5.9+
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
+- macOS 13 (Ventura) or later
+- A logged-in [Claude Code CLI](https://claude.com/claude-code) and/or
+  [Codex CLI](https://developers.openai.com/codex/cli) — Mana shows a service
+  only when it finds that service's login
 
-## Build
+## Not there yet
+
+Notarization (needs a Developer ID certificate), an explicit monitor picker for
+multi-display setups, and richer per-Space behavior. Usage history and spend
+tracking are out of scope for now.
+
+## Development
 
 ```bash
+brew install xcodegen
 xcodegen generate
 xcodebuild -project Mana.xcodeproj -scheme Mana -configuration Debug build
+xcodebuild -project Mana.xcodeproj -scheme Mana -configuration Debug test -destination 'platform=macOS'
 ```
 
-## Test
+The `.xcodeproj` is generated from `project.yml` and is not checked in — run
+`xcodegen generate` after cloning and after any `project.yml` change.
 
-```bash
-xcodebuild -project Mana.xcodeproj -scheme Mana -configuration Debug test \
-  -destination 'platform=macOS'
-```
+Packaging, signing, notarization, the release flow and the Accessibility-grant
+quirk that bites during development are documented in
+[DEVELOPMENT.md](DEVELOPMENT.md).
 
-The `.xcodeproj` is generated by XcodeGen from `project.yml` and is not
-checked into git — always run `xcodegen generate` after cloning or after
-`project.yml` changes.
+## Credits
 
-## Packaging (.dmg)
+The provider layer — how to find each CLI's login, which usage endpoints to
+call, and how to refresh a token without invalidating the CLI's own session —
+follows [openusage](https://github.com/robinebers/openusage) (MIT). See
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-```bash
-scripts/package-dmg.sh
-```
+## License
 
-Builds Release, code-signs `Mana.app`, and packages it into
-`dist/Mana-<version>.dmg` (plus a `.sha256` checksum) using `hdiutil` — no
-third-party tools required. Intermediate build/staging output lives under
-`dist/work/`; `dist/` is gitignored.
-
-**What today's signature actually buys you.** This machine has exactly one
-codesigning identity in the keychain — `Apple Development:
-luhchenkoo@icloud.com` — which the script picks up automatically (see
-identity order below). An Apple Development identity is meant for local
-Xcode debugging, not distribution:
-
-- On **this machine**, the resulting `.dmg`/`.app` run fine as long as they
-  never pick up the `com.apple.quarantine` extended attribute (true for a
-  build you just produced locally and copied/mounted yourself).
-- On **any other Mac**, or once this file *is* quarantined (e.g. someone
-  downloads it, or you `curl`/AirDrop it), Gatekeeper refuses it outright —
-  Apple Development certs are excluded from the "trusted for other people to
-  open" assessment entirely, regardless of who signed it. Opening it there
-  needs either right-click → **Open** (which still asks the user to
-  explicitly trust an unnotarized app) or stripping the attribute:
-  `xattr -d com.apple.quarantine Mana.app`.
-
-The script's own final Gatekeeper check (`spctl -a -t open --context
-context:primary-signature`) simulates the as-if-downloaded assessment, so it
-reports **rejected** with the current identity even on this machine — that's
-expected and is not a bug in the script.
-
-**For real distribution** (what the .dmg needs to open cleanly for other
-people without a workaround):
-
-1. A paid Apple Developer Program membership and a **"Developer ID
-   Application"** certificate (Apple Development does not qualify).
-2. Notarization credentials, stored once:
-   ```bash
-   xcrun notarytool store-credentials "mana-notary" \
-     --apple-id "<your Apple ID email>" \
-     --team-id "<TEAMID>" \
-     --password "<app-specific password>"   # from appleid.apple.com
-   ```
-3. Re-run with that profile name:
-   ```bash
-   MANA_NOTARY_PROFILE=mana-notary scripts/package-dmg.sh
-   ```
-   This submits the built `.dmg` to `notarytool submit --wait` and staples
-   the ticket with `stapler staple` automatically.
-
-**Environment variables the script honors:**
-
-| Variable              | Purpose                                                                                     |
-|------------------------|----------------------------------------------------------------------------------------------|
-| `MANA_SIGN_IDENTITY`  | Force a specific codesign identity (name or SHA-1 hash), bypassing the automatic lookup.     |
-| `MANA_NOTARY_PROFILE` | Name of a `notarytool store-credentials` keychain profile; when unset, notarization is skipped (not an error) and the script prints how to enable it. |
-
-Without `MANA_SIGN_IDENTITY`, the identity is picked in this order: first
-**"Developer ID Application"** identity found by `security find-identity -v
--p codesigning`, then first **"Apple Development"** identity, then ad-hoc
-(`-`) as a last resort — ad-hoc is refused by Gatekeeper even more broadly
-than Apple Development, since nothing about the signer is verifiable at all.
-
-## Releasing
-
-```bash
-scripts/release.sh --dry-run   # build, then print what would be published
-scripts/release.sh             # tag, publish, point the cask at the new build
-```
-
-`scripts/release.sh` builds the `.dmg` via `package-dmg.sh`, tags the current
-commit `v<version>`, creates the GitHub Release with the image and its
-`.sha256`, then rewrites the `version` and `sha256` lines in
-[`packaging/homebrew/mana.rb`](packaging/homebrew/mana.rb) and copies the cask
-into the tap checkout (`MANA_TAP_DIR`, defaulting to the directory `brew tap
-TinyFrontier/tap` uses), committing and pushing it when that checkout has an
-`origin` remote.
-
-The version is never invented by the script — it is whatever the built app
-reports. Bump `CFBundleShortVersionString` and `MARKETING_VERSION` in
-`project.yml` first; the script refuses to run if the tag or release already
-exists, if the working tree is dirty, or if `HEAD` differs from its upstream
-branch.
-
-The cask lives in a **separate** repository, as Homebrew requires: taps must
-be named `homebrew-<name>`, so the cask cannot sit in this repository. The
-copy here under `packaging/homebrew/` is the source of truth that the release
-script copies out.
-
-## Accessibility during development
-
-macOS remembers the Accessibility (TCC) grant against the app's **code
-signature**, not its name or path. Debug builds are ad-hoc signed
-(`CODE_SIGN_IDENTITY = "-"`, see `project.yml`), and an ad-hoc signature's
-designated requirement pins the binary's hash — so **every rebuild produces an
-app macOS considers a different one**. The switch in System Settings → Privacy
-& Security → Accessibility keeps showing "Mana" as ON, while
-`AXIsProcessTrusted()` returns `false` for the build you just made.
-
-Symptom: the onboarding says "Not granted" even though the toggle is on.
-
-Fix, in order of preference:
-
-1. **Reset and re-grant** (fast, works every time):
-
-   ```bash
-   tccutil reset Accessibility com.manabar.Mana
-   ```
-
-   Then relaunch Mana and grant access when asked. Toggling the switch off and
-   on again in System Settings usually works too.
-
-2. **Sign with a stable identity** (grant then survives rebuilds). Create a
-   self-signed code-signing certificate once — Keychain Access → Certificate
-   Assistant → *Create a Certificate…*, name it `Mana Dev`, type *Code
-   Signing* — then build with it:
-
-   ```bash
-   xcodebuild -project Mana.xcodeproj -scheme Mana -configuration Debug \
-     CODE_SIGN_IDENTITY="Mana Dev" build
-   ```
-
-3. **Run from a stable path.** A copy in `/Applications` and a copy in
-   DerivedData are two separate entries as far as TCC is concerned.
-
-Two things make this less painful than it used to be:
-
-- Mana **re-checks the grant while running** (`AccessibilityPermissionMonitor`
-  polls every 2s *only while permission is missing*, and stops the moment it's
-  granted). Granting access no longer requires restarting the app — the
-  hot-zone monitor is re-armed in place, and the onboarding status updates
-  itself. There's also a "Recheck" button next to the status row.
-- Hover-to-show does **not** actually depend on the grant. Global *mouse-move*
-  monitoring works without it — only key-event monitoring is gated — so the
-  hot zone is armed regardless. The permission remains worth granting for
-  reliability across Spaces/full-screen apps, and the menu-bar "Show/Hide
-  Panel" item is always available as a fallback.
+[MIT](LICENSE).

@@ -30,6 +30,10 @@ notarized .dmg), not sandboxed — see spec for why.
 
 ## Source of truth
 
+> Note for anyone reading this in the public repository: `docs/` is
+> gitignored — the spec, research and design notes are local-only, so the
+> links below resolve on a maintainer's machine, not on GitHub.
+
 - **Spec**: [`docs/ТЗ-Mana.md`](docs/ТЗ-Mana.md) — read this first for any
   behavioral question (panel show/hide mechanics, thresholds, settings,
   acceptance criteria, out-of-scope items).
