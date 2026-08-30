@@ -128,11 +128,13 @@ gh release create "$TAG" \
   "$DMG_PATH.sha256" \
   --repo "$REPO" \
   --title "Mana $VERSION" \
-  --notes "Install: \`brew install --cask --no-quarantine TinyFrontier/tap/mana\`
+  --notes "Install: \`brew install --cask TinyFrontier/tap/mana\`
 
 Not notarized (needs a paid Apple Developer Program membership), so Gatekeeper
-refuses this build as if downloaded. The cask strips the quarantine attribute;
-for a manual download use right-click → Open, or
+refuses this build as if downloaded. The cask strips the quarantine attribute
+for you. A manual download needs it removed by hand — on macOS 15 and later
+right-click → Open no longer clears it, so either approve the app under System
+Settings → Privacy & Security, or run
 \`xattr -d com.apple.quarantine /Applications/Mana.app\`.
 
 Requires macOS 13 (Ventura) or later."
